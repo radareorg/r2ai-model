@@ -14,9 +14,3 @@ Exploit Dev	How do I find distance between base and debug map for ASLR analysis?
 Exploit Dev	How do I calculate size needed for buffer overflow to reach saved EIP?	?v $r{ebp}-$r{esp}+4
 Exploit Dev	How do I get current block size for heap overflow calculation?	?v $b
 Exploit Dev	How do I find offset between program base and specific function for ROP?	?v $FB-$DB
-Exploit Dev	How do I calculate distance to next readable memory page?	?v $MM-$$
-Exploit Dev	How do I get stack frame size for local variable analysis?	?v $r{rbp}-$r{rsp}
-Exploit Dev	How do I find offset between two consecutive function calls?	?v $Cn-$C{n-1}
-Exploit Dev	How do I calculate padding needed to align stack?	?v 16-($r{rsp}%16)
-Exploit Dev	How do I get size of memory region for heap spray?	?v $MM
-Firmware Analysis	How do I get size of firmware section for extraction?	?v $SS
