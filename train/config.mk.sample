@@ -1,0 +1,27 @@
+# Sample configuration for Makefile automation
+# Copy this to `config.mk` or let `make` copy it automatically on first run.
+
+# Base model to download (Hugging Face repo id)
+BASE_MODEL = meta-llama/Llama-2-7b
+
+# Local directory to store the downloaded model files
+MODEL_DIR = ./model_cache/$(notdir $(BASE_MODEL))
+
+# Where to place converted outputs
+OUTPUT_DIR = ./out
+OUTPUT = $(OUTPUT_DIR)/model.gguf
+
+# Hugging Face token (optional). If empty, download will use public access.
+HF_TOKEN =
+
+# Repo and local dir for llama.cpp (converter)
+LLAMA_REPO = https://github.com/ggerganov/llama.cpp.git
+LLAMA_DIR = ./tools/llama.cpp
+
+# PyTorch install preference: 'cpu' or provide custom handling in Makefile for CUDA
+PYTORCH_INSTALL = cpu
+
+# Quantization option passed to converter (converter-dependent)
+QUANTIZE = none
+
+# You can override any of the above by creating a repo-local `config.mk`.
