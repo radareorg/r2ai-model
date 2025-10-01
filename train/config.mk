@@ -5,8 +5,8 @@
 
 # Base model to download (Hugging Face repo id)
 # With 2x5090 (64GB VRAM total), you can train much larger models!
-# Options: google/gemma-3-270m (270M - trains VERY fast)
-#          google/gemma-3-27b (27B - much more powerful, slower training)
+# Options: unsloth/gemma-3-270m-it (270M - trains VERY fast, as requested)
+#          unsloth/gemma-3-27b-it (27B - much more powerful, slower training)
 BASE_MODEL = google/gemma-3-270m
 
 # Local directory to store the downloaded model files
@@ -43,6 +43,6 @@ NUM_EPOCHS = 3
 MAX_STEPS = -1  # Set to positive number to override epochs
 LORA_R = 32  # Increased rank for better fine-tuning quality
 LORA_ALPHA = 32
-MAX_SEQ_LENGTH = 2048  # Context length
+MAX_SEQ_LENGTH = 2048  # Longer context with more VRAM
 
 # You can override any of the above by creating a repo-local `config.mk`.

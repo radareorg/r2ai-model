@@ -1,47 +1,97 @@
-# Getting a .gguf model using only `make`
+# Fine-tuning LLMs for radare2 using Transformers + PEFT
 
-This repository includes a `Makefile` that sets up a Python `venv`, installs dependencies, runs training, and converts a trained checkpoint into a `.gguf` file. The goal is to get a ready-to-use `.gguf` using only `make` commands.
+This repository includes a `Makefile` that uses `uv` (ultra-fast Python package manager) to set up dependencies, train models with Transformers and PEFT (LoRA), and convert checkpoints to `.gguf` format. Optimized for multi-GPU training.
 
-Prerequisites
-- Python 3 installed and accessible as `python3`.
-- If you have a GPU, install the appropriate CUDA-enabled PyTorch inside the venv (see notes below).
-- A training entrypoint `train.py` that accepts `--base_model`, `--data_dir`, and `--output_dir`, or edit the `train` target in `Makefile` to call your existing training command.
-- A conversion script `convert_to_gguf.py` (or adapt the `convert` target to call your preferred converter like the `llama.cpp` conversion tool).
+## Prerequisites
+- **Python 3.10+** installed
+- **uv** package manager - install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- **CUDA** (optional but recommended for GPU training)
+- **2x RTX 5090** or other NVIDIA GPUs for fast training
 
-Quick one-line workflow (uses just `make`):
+## Quick Start (just run `make`!)
 
-1. Create the venv and install dependencies:
+**Training is as simple as:**
 
-```
-make        # same as `make install` — creates ./venv and installs deps
-```
-
-2. Run training (example):
-
-```
-make train BASE_MODEL=facebook/llama-2-7b DATA_DIR=../data OUTPUT_DIR=./out
+```bash
+cd train
+make  # Creates .venv with uv, installs deps, and starts training!
 ```
 
-- Replace `BASE_MODEL` with the HF repo ID or local checkpoint you want to fine-tune.
-- `DATA_DIR` should point to your dataset folder.
-- `OUTPUT_DIR` is where checkpoints will be written.
+The default config trains `google/gemma-3-270m` on all TSV files in `../data`.
 
-3. Convert the trained checkpoint to `.gguf`:
+### Configuration
 
+Edit `config.mk` (auto-created from `config.mk.sample`) to customize:
+
+```makefile
+BASE_MODEL = google/gemma-3-270m      # Or google/gemma-3-27b for larger model
+DATA_DIR = ../data                    # Your training data (TSV files)
+BATCH_SIZE = 16                       # Per-GPU batch size
+NUM_EPOCHS = 3                        # Training epochs
+LORA_R = 32                           # LoRA rank (higher = better quality)
+MAX_SEQ_LENGTH = 2048                 # Context length
 ```
-make convert OUTPUT=./out/model.gguf OUTPUT_DIR=./out
+
+### Multi-GPU Training
+
+The Makefile automatically detects and uses all available GPUs:
+
+```bash
+make train  # Uses torchrun with all GPUs automatically
 ```
 
-- The `convert` target looks for a `convert_to_gguf.py` script by default; if you use another converter (for example, the `llama.cpp`/ggml conversion scripts), update the `convert` target in `Makefile` to call it.
+### Individual Steps
 
-Files referenced
-- `Makefile:1` — contains the targets: `venv`, `install`, `train`, `convert`, `freeze-reqs`, `clean`.
+```bash
+make install          # Install dependencies with uv (very fast!)
+make train           # Train the model
+make convert         # Convert to GGUF format (optional)
+make clean           # Remove venv, cache, outputs
+```
 
-Notes & troubleshooting
-- If a `requirements.txt` file exists, `make install` will install from it. Otherwise the Makefile installs a set of common packages (`transformers`, `datasets`, `accelerate`, `peft`, `safetensors`, `sentencepiece`, `huggingface_hub`).
-- Installing PyTorch with the correct CUDA support is environment-specific. After `make` you can activate the venv and install a CUDA-enabled PyTorch with the official instructions from https://pytorch.org/.
-- If you don’t have `train.py` or `convert_to_gguf.py`, you can either add them to the repo or modify the `train`/`convert` targets in `Makefile` to call your tooling (for example, `accelerate launch train.py ...` or `python path/to/llama.cpp/convert.py ...`).
-- The Makefile will print helpful messages if expected scripts are missing.
+## Why uv?
 
-Want me to add a minimal `train.py` or a conversion wrapper that calls a known gguf converter? I can scaffold those next.
+- **10-100x faster** than pip for package installation
+- **Better dependency resolution** with conflict detection
+- **Drop-in replacement** for pip/venv workflows
+- **Works with existing requirements.txt** and pyproject.toml
+
+## Training Details
+
+### Data Format
+
+Training data is loaded from TSV files with this format:
+
+```tsv
+Category	Question	Command
+Code Analysis	How do I get function size?	?v $FS
+Exploit Dev	How do I calculate offset to return address?	?v $r{rsp}-$B
+```
+
+All `.tsv` files in `DATA_DIR` are automatically discovered and loaded (excluding `.tsv.ignored` and `.tsv.ok` files).
+
+### Model Output
+
+After training, the LoRA adapter is saved to `./out/lora_model/`:
+- `adapter_model.safetensors` - LoRA weights
+- `adapter_config.json` - LoRA configuration
+- `training_metadata.json` - Training info
+
+### GPU Requirements
+
+- **Gemma-3-270M**: ~4GB VRAM (runs on any GPU)
+- **Gemma-3-27B**: ~16GB VRAM with 4-bit quantization
+- **Multi-GPU**: Automatically uses DDP (Distributed Data Parallel)
+
+## Troubleshooting
+
+**RTX 5090 CUDA compatibility warning**: The RTX 5090 is very new (sm_120). PyTorch 2.6 doesn't fully support it, but training still works. For full support, use PyTorch nightly:
+
+```bash
+uv pip install --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu124
+```
+
+**Out of memory**: Reduce `BATCH_SIZE` or `MAX_SEQ_LENGTH` in `config.mk`
+
+**Slow training on CPU**: Make sure `PYTORCH_INSTALL=cuda` is set in `config.mk`
 
