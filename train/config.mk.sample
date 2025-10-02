@@ -32,8 +32,8 @@ LLAMA_DIR = ./tools/llama.cpp
 # Set to 'cuda' to use GPU acceleration (much faster!)
 PYTORCH_INSTALL = cuda
 
-# Quantization option passed to converter (converter-dependent)
-QUANTIZE = none
+# Quantization option for GGUF conversion (Q4_K_M, Q5_K_M, Q8_0, or none/f16)
+QUANTIZE = Q4_K_M
 
 # Training hyperparameters (optimized for 2x RTX 5090, 64GB total VRAM)
 BATCH_SIZE = 16  # Increased for better GPU utilization

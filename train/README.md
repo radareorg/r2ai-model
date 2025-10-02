@@ -30,6 +30,7 @@ BATCH_SIZE = 16                       # Per-GPU batch size
 NUM_EPOCHS = 3                        # Training epochs
 LORA_R = 32                           # LoRA rank (higher = better quality)
 MAX_SEQ_LENGTH = 2048                 # Context length
+QUANTIZE = Q4_K_M                     # GGUF quantization (Q4_K_M, Q5_K_M, Q8_0, or f16)
 ```
 
 ### Multi-GPU Training
@@ -40,13 +41,20 @@ The Makefile automatically detects and uses all available GPUs:
 make train  # Uses torchrun with all GPUs automatically
 ```
 
+### What `make train` does
+
+1. **Trains** the model with LoRA on your data
+2. **Tests** the model with inference examples
+3. **Merges** LoRA adapter with base model
+4. **Converts** to GGUF format (Q4_K_M quantization by default)
+5. **Outputs** final GGUF file to `./out/model.gguf`
+
 ### Individual Steps
 
 ```bash
 make install          # Install dependencies with uv (very fast!)
-make train           # Train the model
-make convert         # Convert to GGUF format (optional)
-make clean           # Remove venv, cache, outputs
+make train            # Full pipeline: train + test + merge + convert to GGUF
+make clean            # Remove venv, cache, outputs
 ```
 
 ## Why uv?
@@ -72,10 +80,11 @@ All `.tsv` files in `DATA_DIR` are automatically discovered and loaded (excludin
 
 ### Model Output
 
-After training, the LoRA adapter is saved to `./out/lora_model/`:
-- `adapter_model.safetensors` - LoRA weights
-- `adapter_config.json` - LoRA configuration
-- `training_metadata.json` - Training info
+After training completes, you'll have:
+- `./out/model.gguf` - **Ready-to-use GGUF model** (quantized, merged)
+- `./out/lora_model/` - LoRA adapter (adapter_model.safetensors, config)
+- `./out/merged_model/` - Full merged model in HuggingFace format
+- `./out/lora_model/training_metadata.json` - Training info
 
 ### GPU Requirements
 

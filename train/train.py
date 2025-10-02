@@ -203,8 +203,8 @@ def main():
 
     trainer.train()
 
-    # Save
-    print(f"Saving model to {args.output_dir}")
+    # Save LoRA adapter
+    print(f"Saving LoRA adapter to {args.output_dir}")
     model.save_pretrained(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
 
@@ -218,6 +218,44 @@ def main():
     }
     with open(f"{args.output_dir}/training_metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)
+
+    print("\n" + "="*60)
+    print("Testing model with inference examples...")
+    print("="*60 + "\n")
+
+    # Test inference on a few examples
+    model.eval()
+    test_questions = [
+        "How do I analyze a function?",
+        "How do I set a breakpoint?",
+        "How do I print function names?",
+    ]
+
+    for question in test_questions:
+        prompt = f"""Below is a question about radare2. Write a command that appropriately answers the question.
+
+### Question:
+{question}
+
+### Command:
+"""
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=64,
+                temperature=0.7,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Extract just the command part
+        if "### Command:" in response:
+            command = response.split("### Command:")[-1].strip()
+        else:
+            command = response
+        print(f"Q: {question}")
+        print(f"A: {command}\n")
 
     print("Training complete!")
 

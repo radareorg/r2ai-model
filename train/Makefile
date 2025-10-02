@@ -23,8 +23,9 @@ HF_TOKEN ?=
 LLAMA_REPO ?= https://github.com/ggerganov/llama.cpp.git
 LLAMA_DIR ?= ./tools/llama.cpp
 PYTORCH_INSTALL ?= cpu
-QUANTIZE ?= none
+QUANTIZE ?= Q4_K_M
 LORA_MODEL_DIR ?= $(OUTPUT_DIR)/lora_model
+MERGED_MODEL_DIR ?= $(OUTPUT_DIR)/merged_model
 CONVERTER_SCRIPTS := convert_hf_to_gguf.py convert_llama_ggml_to_gguf.py convert_lora_to_gguf.py gguf-py/convert_hf_to_gguf.py
 # Training parameters
 BATCH_SIZE ?= 2
@@ -74,7 +75,7 @@ download_model: install
 	@$(PY) scripts/download_model.py "$(BASE_MODEL)" "$(MODEL_DIR)" "$(HF_TOKEN)"
 
 ## Fine-tune with standard Transformers (multi-GPU compatible)
-train: install
+train: install build_converter
 	@if [ -z "$(BASE_MODEL)" ]; then \
 		echo "ERROR: BASE_MODEL is not set. Set it in config.mk"; \
 		exit 1; \
@@ -131,6 +132,15 @@ train: install
 			--lora_alpha $(LORA_ALPHA) \
 			--max_seq_length $(MAX_SEQ_LENGTH); \
 	fi
+	@echo "\n"
+	@echo "Merging LoRA adapter and converting to GGUF..."
+	@$(PY) scripts/merge_and_convert.py \
+		--base_model "$(BASE_MODEL)" \
+		--lora_adapter "$(LORA_MODEL_DIR)" \
+		--output_dir "$(MERGED_MODEL_DIR)" \
+		--gguf_output "$(OUTPUT)" \
+		--llama_cpp_dir "$(LLAMA_DIR)" \
+		--quantize "$(QUANTIZE)"
 
 ## Clone and build llama.cpp for conversion tools
 build_converter:
