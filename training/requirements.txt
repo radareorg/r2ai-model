@@ -7,6 +7,8 @@ peft>=0.4.0
 
 datasets
 openai
+mistral_common
+sentencepiece
 
 # Data processing
 pandas>=1.5.0

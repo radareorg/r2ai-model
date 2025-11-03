@@ -29,7 +29,8 @@ training:
 
 # Quantization (for GGUF export)
 quantization:
-  method: "q4_k_m"  # Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, f32
+  #  method: "q4_k_m"  # Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, f32
+  method: "bf16"  # Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, f32
   use_fast_tokenizer: true
 
 # Platform-specific settings

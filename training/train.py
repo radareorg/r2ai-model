@@ -43,7 +43,7 @@ def setup_model_and_tokenizer(config):
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
     )
 
@@ -157,32 +157,36 @@ def export_to_gguf(config, model_path):
     output_name = config['export']['output_name']
     gguf_path = f"{output_name}.gguf"
 
-    # First, convert to HF format if needed
-    convert_script = """
-import sys
-sys.path.insert(0, 'llama.cpp')
-from convert_hf_to_gguf import main as convert_main
-
-if __name__ == "__main__":
-    import sys
-    sys.argv = ['convert.py', '--model', '{model_path}', '--outtype', '{quantization}', '--outfile', '{gguf_path}']
-    convert_main()
-""".format(
-        model_path=model_path,
-        quantization=config['quantization']['method'],
-        gguf_path=gguf_path
-    )
-
-    with open('convert_temp.py', 'w') as f:
-        f.write(convert_script)
-
+    # Path to llama.cpp
+    llama_cpp_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '..', 'llama.cpp')
+    
     try:
-        subprocess.run([sys.executable, 'convert_temp.py'], check=True)
-        print(f"GGUF exported to: {gguf_path}")
+        # Use the original convert.py from llama.cpp
+        convert_script = os.path.join(llama_cpp_path, 'convert_hf_to_gguf.py')
+        
+        if not os.path.exists(convert_script):
+            raise FileNotFoundError(f"convert_hf_to_gguf.py not found at {convert_script}")
+        
+        # Use the same Python executable that's running this script
+        result = subprocess.run([
+            sys.executable, 
+            convert_script,
+            model_path,
+            '--outtype', config['quantization']['method'],
+            '--outfile', os.path.abspath(gguf_path)
+        ], capture_output=True, text=True, check=True)
+        
+        print(f"GGUF exported to: {os.path.abspath(gguf_path)}")
+        if result.stdout:
+            print("Conversion output:", result.stdout)
     except subprocess.CalledProcessError as e:
         print(f"Failed to export GGUF: {e}")
-    finally:
-        os.remove('convert_temp.py')
+        if e.stdout:
+            print("STDOUT:", e.stdout)
+        if e.stderr:
+            print("STDERR:", e.stderr)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
 
 def export_to_mlx(config, model_path):
     """Export model to MLX format for Mac."""
