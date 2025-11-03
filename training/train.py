@@ -43,7 +43,7 @@ def setup_model_and_tokenizer(config):
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
     )
 
@@ -120,7 +120,8 @@ def train_model(config, model, tokenizer, dataset):
         greater_is_better=config['training']['greater_is_better'],
         eval_strategy="steps",
         save_strategy="steps",
-        fp16=torch.cuda.is_available(),
+        fp16=False,
+        bf16=torch.cuda.is_available(),
         dataloader_pin_memory=False,
     )
 
