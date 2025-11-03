@@ -153,7 +153,6 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How to disable the virtual addressing to work with physical offsets?"}, {"role": "assistant", "content": "e io.va=false"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How to use virtual addressing defined by the IO maps?"}, {"role": "assistant", "content": "e io.va=true"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Search for aligned 32bit values that represent valid mapped addresses in the current memory layout?"}, {"role": "assistant", "content": "aav"}]}
-{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I seek to the end of the binary?"}, {"role": "assistant", "content": NaN}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I seek to the symbol named 'sym.boo' in radare2?"}, {"role": "assistant", "content": "s sym.boo"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I dump the current block (defined with the `b` command) to `file.bin`?"}, {"role": "assistant", "content": "wtf file.bin"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "What command displays the program entrypoint address?"}, {"role": "assistant", "content": "ie"}]}
@@ -250,7 +249,6 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Which functions are using math imports?"}, {"role": "assistant", "content": "iiccx math"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Is the program using the ncurses library?"}, {"role": "assistant", "content": "il~ncurses"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "I want to see what kind of memory alignment the architecture uses. How do I find alignment checks?"}, {"role": "assistant", "content": "aia~^codealign[1]"}]}
-{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "I want to see what kind of cleanup operations happen at program exit.,axt @sym.atexit"}, {"role": "assistant", "content": NaN}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I display all the stack backtrace in the debugger?"}, {"role": "assistant", "content": "dbt"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Disable the automatic analysis of function arguments before calling `af` or `aa`."}, {"role": "assistant", "content": "e anal.vars=false"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Display function signature containing return and arguments types"}, {"role": "assistant", "content": "afs"}]}
@@ -288,7 +286,7 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Analyze all functions referenced from a CALL instruction"}, {"role": "assistant", "content": "aac"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Find all functions calling `system`"}, {"role": "assistant", "content": "axt"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Which functions are calling exit?"}, {"role": "assistant", "content": "axtf sym.imp.exit"}]}
-{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "List all syscalls matching by name "}, {"role": "assistant", "content": "/asl~write"}]}
+{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "List all syscalls matching by name"}, {"role": "assistant", "content": "/asl~write"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "List config vars in JSON format"}, {"role": "assistant", "content": "ej"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Change the local variable named `counter` to use the type `int32_t`"}, {"role": "assistant", "content": "afvt counter int32_t"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Show the type for the local variable named `counter`"}, {"role": "assistant", "content": "afvt argv"}]}
@@ -296,7 +294,7 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I list all basic block references?"}, {"role": "assistant", "content": "abl"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Set the calling convention of the `add` function to `cdecl`."}, {"role": "assistant", "content": "afc cdecl @ sym.add"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I look for functions that might be doing crypto stuff? Like searching for AES or SHA"}, {"role": "assistant", "content": "afl~crypto,aes,sha,md5;iiccx crypto"}]}
-{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I get the size of the instruction pointer by the program counter that is going to be executed "}, {"role": "assistant", "content": "aos@r:PC"}]}
+{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I get the size of the instruction pointer by the program counter that is going to be executed"}, {"role": "assistant", "content": "aos@r:PC"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Seek to the next data block (consider changing the block size with the `b` command)"}, {"role": "assistant", "content": "b++"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Seek to the previous data block (consider changing the block size with the `b` command)"}, {"role": "assistant", "content": "b--"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How to find the distance between `sym.main` and `sym.hello`"}, {"role": "assistant", "content": "?vi sym.main-sym.hello"}]}
@@ -324,7 +322,7 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Display hexdump with annotated comments, bookmarks and flags"}, {"role": "assistant", "content": "pxa"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Decode data from address 0x450032 as base64"}, {"role": "assistant", "content": "p6d @ 0x450032"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Generate 32 space separated 4 digit PIN patterns"}, {"role": "assistant", "content": "ppn 32"}]}
-{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Display code analysis coverage. How much executable region is code "}, {"role": "assistant", "content": "a~^per[1]"}]}
+{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Display code analysis coverage. How much executable region is code"}, {"role": "assistant", "content": "a~^per[1]"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Find new functions by scanning for function preludes"}, {"role": "assistant", "content": "aap"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Find the path between sym.main and sym.usage listing the addresses of the basic blocks involved"}, {"role": "assistant", "content": "abp sym.usage @ sym.main"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Colorize in red the basic block at address 0x102030"}, {"role": "assistant", "content": "abc red @ 0x102030"}]}
