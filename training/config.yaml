@@ -2,7 +2,9 @@
 
 # Model Configuration
 model:
-  name: "HuggingFaceTB/SmolLM-135M"  # Default model, can be changed to any HF model
+  name: "jan-hq/Qwen3-4B-no-think"  # jan-hq Qwen3 model (4B params, transformers compatible)
+  # name: "jan-hq/Jan-nano-orig"  # jan-nano model (4B params, qwen3 architecture) - not transformers compatible
+  # name: "HuggingFaceTB/SmolLM-135M"  # Default model, can be changed to any HF model (commented)
   tokenizer: null  # Use same as model if null
 
 # Dataset Configuration
@@ -45,7 +47,7 @@ platform:
 export:
   gguf: true  # Export to GGUF format (Linux/NVIDIA)
   mlx: false  # Export to MLX format (Mac)
-  output_name: "radare2-smollm-finetuned"
+  output_name: "radare2-qwen3-4b-finetuned"
 
 # Additional options
 lora:
