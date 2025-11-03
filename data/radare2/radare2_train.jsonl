@@ -153,6 +153,7 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How to disable the virtual addressing to work with physical offsets?"}, {"role": "assistant", "content": "e io.va=false"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How to use virtual addressing defined by the IO maps?"}, {"role": "assistant", "content": "e io.va=true"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Search for aligned 32bit values that represent valid mapped addresses in the current memory layout?"}, {"role": "assistant", "content": "aav"}]}
+{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I seek to the end of the binary?"}, {"role": "assistant", "content": NaN}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How do I seek to the symbol named 'sym.boo' in radare2?"}, {"role": "assistant", "content": "s sym.boo"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I dump the current block (defined with the `b` command) to `file.bin`?"}, {"role": "assistant", "content": "wtf file.bin"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "What command displays the program entrypoint address?"}, {"role": "assistant", "content": "ie"}]}
@@ -249,6 +250,7 @@
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Which functions are using math imports?"}, {"role": "assistant", "content": "iiccx math"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Is the program using the ncurses library?"}, {"role": "assistant", "content": "il~ncurses"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "I want to see what kind of memory alignment the architecture uses. How do I find alignment checks?"}, {"role": "assistant", "content": "aia~^codealign[1]"}]}
+{"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "I want to see what kind of cleanup operations happen at program exit.,axt @sym.atexit"}, {"role": "assistant", "content": NaN}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "How can I display all the stack backtrace in the debugger?"}, {"role": "assistant", "content": "dbt"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Disable the automatic analysis of function arguments before calling `af` or `aa`."}, {"role": "assistant", "content": "e anal.vars=false"}]}
 {"messages": [{"role": "system", "content": "\n***RADARE2 MODE: ON***\n"}, {"role": "user", "content": "Display function signature containing return and arguments types"}, {"role": "assistant", "content": "afs"}]}

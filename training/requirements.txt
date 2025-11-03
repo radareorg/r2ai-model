@@ -1,0 +1,23 @@
+# Core ML libraries
+torch>=2.0.0
+transformers>=4.30.0
+datasets>=2.10.0
+accelerate>=0.20.0
+peft>=0.4.0
+
+datasets
+openai
+
+# Data processing
+pandas>=1.5.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Hugging Face
+huggingface_hub>=0.15.0
+
+# Optional: for GGUF conversion (install llama.cpp separately)
+# llama-cpp-python>=0.2.0
+
+# Optional: for MLX (macOS only)
+# mlx>=0.0.1

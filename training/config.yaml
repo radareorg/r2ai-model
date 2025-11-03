@@ -1,0 +1,59 @@
+# Training Configuration for Radare2 AI Model Fine-tuning
+
+# Model Configuration
+model:
+  name: "HuggingFaceTB/SmolLM-135M"  # Default model, can be changed to any HF model
+  tokenizer: null  # Use same as model if null
+
+# Dataset Configuration
+dataset:
+  path: "../data/radare2/radare2_train.jsonl"  # Path to the compiled dataset
+  test_split: 0.1  # Fraction of data for testing
+
+# Training Hyperparameters
+training:
+  output_dir: "./output"  # Directory to save model checkpoints
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 2e-5
+  warmup_steps: 500
+  logging_steps: 100
+  save_steps: 500
+  eval_steps: 500
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+
+# Quantization (for GGUF export)
+quantization:
+  method: "q4_k_m"  # Options: q4_0, q4_1, q5_0, q5_1, q8_0, f16, f32
+  use_fast_tokenizer: true
+
+# Platform-specific settings
+platform:
+  linux:
+    use_cuda: true
+    cuda_visible_devices: "0"  # GPU device IDs
+  mac:
+    use_mps: true  # For Apple Silicon
+
+# Export settings
+export:
+  gguf: true  # Export to GGUF format (Linux/NVIDIA)
+  mlx: false  # Export to MLX format (Mac)
+  output_name: "radare2-smollm-finetuned"
+
+# Additional options
+lora:
+  use_lora: false  # Use LoRA for efficient fine-tuning
+  r: 8
+  lora_alpha: 16
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+# Dataset compilation settings (for reference)
+dataset_compilation:
+  categories: ["crypto", "general", "vulnerability", "exploit", "reverse engineering", "binary analysis", "binary patching", "debugging"]
+  num_examples_per_category: 100
