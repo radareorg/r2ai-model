@@ -1,0 +1,26 @@
+# Core ML/AI libraries with CUDA support
+torch>=2.0.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+torchvision>=0.15.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+torchaudio>=2.0.0+cu118 --index-url https://download.pytorch.org/whl/cu118
+
+# Transformers and datasets
+transformers>=4.30.0
+datasets>=2.12.0
+accelerate>=0.20.0
+peft>=0.4.0
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Configuration and utilities
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Optional: For GGUF export (requires llama.cpp)
+# git+https://github.com/ggerganov/llama.cpp.git
+
+# Development and testing
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0
