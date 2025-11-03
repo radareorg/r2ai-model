@@ -133,7 +133,7 @@ Example Response:
           {'role': 'system', 'content': system_prompt},
           {'role': 'user', 'content': user_prompt}
         ],
-        'model': 'gpt-4o',
+        'model': 'gpt-4o', # gpt-5-mini
         'temperature': 0.5,
         'top_p': 0.9,
         'max_tokens': 16000

@@ -1,4 +1,3 @@
-import anthropic
 import openai
 import pandas as pd
 import time
@@ -8,19 +7,22 @@ import os
 import json
 from io import StringIO
 
-from r2ai.auto import ChatAuto
-
 from datetime import datetime
 today = datetime.now().strftime("%Y-%m-%d")
-# model = "openai/gpt-4o"
-model = "claude-3-5-sonnet-20241022"
-# model = "claude-3-opus-20240229"
-# max_tokens = 4095
+
+# OpenAI API configuration
+model = os.getenv("OPENAI_MODEL", "gpt-4o")
+base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+api_key = os.getenv("OPENAI_API_KEY")
 max_tokens = 8000
 temperature = 0.7
 top_p = 0.9
 
-llm = ChatAuto(model=model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, timeout=120)
+# Initialize OpenAI client
+client = openai.OpenAI(
+    api_key=api_key,
+    base_url=base_url
+)
 
 def generate_dataset(num_examples=10):
     """Generate multiple examples and save to CSV"""
@@ -42,10 +44,17 @@ def generate_dataset(num_examples=10):
             {"role": "user", "content": f"""{row['q']}\t{row['a']}"""}
         ]
         
-        response = llm.chat(messages=messages, stream=False)
-        print(response['content'])
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p
+        )
+        content = response.choices[0].message.content
+        print(content)
         
-        parsed = pd.read_csv(StringIO(response['content']), sep='\t', names=['q', 'a'])
+        parsed = pd.read_csv(StringIO(content), sep='\t', names=['q', 'a'])
         data = pd.concat([data, pd.DataFrame([row]), parsed], ignore_index=True)
         # Save intermediate results after each batch
         data.to_csv(f'data/radare2/radare2_enriched.tsv', sep='\t', index=False)
@@ -63,7 +72,7 @@ def generate_dataset(num_examples=10):
     df_train = df
     # df_val = df[train_size:]
 
-    df_train.to_csv(file_path, sep='\t', index=False)
+    df_train.to_csv(f'data/radare2/radare2_enriched.tsv', sep='\t', index=False)
     # df_val.to_csv(f'data/pending/{today}_radare2_val.tsv', sep='\t', index=False)
     
     print(f"Generated {len(df)} examples")

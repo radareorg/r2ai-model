@@ -1,4 +1,3 @@
-import anthropic
 import openai
 import pandas as pd
 import time
@@ -6,11 +5,10 @@ from tqdm import tqdm
 import random
 import os
 import json
-from r2ai.auto import ChatAuto
 
 from datetime import datetime
 today = datetime.now().strftime("%Y-%m-%d")
-model = "openai/gpt-4o"
+model = "gpt-4o"
 # model = "claude-3-5-sonnet-20241022"
 # model = "claude-3-opus-20240229"
 # max_tokens = 4095
@@ -18,7 +16,11 @@ max_tokens = 16000
 temperature = 0.7
 top_p = 0.9
 
-llm = ChatAuto(model=model, max_tokens=max_tokens, temperature=temperature, top_p=top_p, timeout=120)
+# Configure OpenAI client - you can set custom base_url and model via environment variables
+client = openai.OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+)
 def generate_pair(messages):
     commands = open("data/radare2/sources/all_commands.txt", "r").read()
     fortunes = open("data/radare2/sources/fortunes.tips", "r").read()
@@ -48,9 +50,15 @@ Datetime: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
     text = ""
 
     try:
-        response = llm.chat(messages=[{"role": "system", "content": prompt}, *messages], stream=False)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "system", "content": prompt}, *messages],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p
+        )
         # Parse response
-        text = response['content']
+        text = response.choices[0].message.content
         messages.append({"role": "assistant", "content": text})
         data = json.loads(text.replace("```json", "").replace("```", ""))
         if(len(data) > 0):
@@ -70,7 +78,7 @@ def generate_dataset(file_path, num_examples=1000, messages=[], category=None):
     while len(data) < num_examples:
         lines = generate_pair(messages)
         
-        if len(lines) > 0:
+        if lines and len(lines) > 0:
             data.extend(lines)
             pbar.update(len(lines))
         

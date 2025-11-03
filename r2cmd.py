@@ -1,8 +1,8 @@
 import json
 import uuid
-import random  # Nuovo import per lo shuffling
+import random
 
-# Definizione dello strumento r2cmd
+# Definition of the r2cmd tool
 tools = [
     {
         "type": "function",
@@ -26,14 +26,21 @@ tools = [
 def convert_entry(original_entry):
     messages = original_entry["messages"]
     
-    # Aggiorna il system message con la descrizione di r2cmd
+    # Update the system message with the r2cmd description
     system_msg = messages[0]
     system_msg["content"] += "\n\nAvailable tool:\n- r2cmd: Execute radare2 commands. Usage: `r2cmd <command>`"
     
-    # Prendi il comando dalla risposta dell'assistente originale
+    # Take the command from the original assistant response
     user_msg = messages[1]
     assistant_msg = messages[2]
-    r2_command = assistant_msg["content"].strip()  # Es: "CCf~cases"
+    content = assistant_msg["content"]
+    
+    # Handle cases where content might be NaN or non-string
+    if isinstance(content, str):
+        r2_command = content.strip()
+    else:
+        # Skip entries with non-string content (like NaN)
+        return None
     
     call_id = f"call{uuid.uuid4().hex[:5]}"
     
@@ -71,15 +78,16 @@ def convert_entry(original_entry):
         "tools": tools
     }
 
-# Carica il dataset originale
-with open("./r2ai-model/data/radare2/radare2_train.jsonl", "r") as f:
+# Load the original dataset
+with open("./data/radare2/radare2_train.jsonl", "r") as f:
     original_entries = [json.loads(line) for line in f]
 
-# Converti e rimescola le entry
+# Convert and shuffle the entries
 converted_dataset = [convert_entry(entry) for entry in original_entries]
-random.shuffle(converted_dataset)  # Rimescola casualmente
+converted_dataset = [entry for entry in converted_dataset if entry is not None]  # Filter out None entries
+random.shuffle(converted_dataset)  # Shuffle randomly
 
-# Salva il dataset shuffled
-with open("./r2ai-model/data/radare2/function_calling_r2cmd_dataset.jsonl", "w") as f:
+# Save the shuffled dataset
+with open("./data/radare2/function_calling_r2cmd_dataset.jsonl", "w") as f:
     for entry in converted_dataset:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
