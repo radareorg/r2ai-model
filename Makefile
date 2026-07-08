@@ -3,3 +3,15 @@ TSVFILE=data/radare2/pending/claude-numbers2.tsv
 
 all:
 	./review-pending.sh "${TSVFILE}"
+
+agentic:
+	./agentic-dataset.py build
+
+agentic-r2cmd:
+	./agentic-dataset.py build --dataset r2cmd
+
+agentic-r2js:
+	./agentic-dataset.py build --dataset r2js
+
+agentic-reasoning:
+	./agentic-dataset.py build --dataset reasoning

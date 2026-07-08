@@ -1,0 +1,4 @@
+dataset	id	kind	question	proposed_answer	fixture	reason	status	source_refs
+agentic	r2js.whatarch.thumb_mode	r2js	Does the whatarch.r2.js arm-16 result for the BLE blob mean Thumb mode, and which extra checks should be required before training that as a fact?	js: scripts/whatarch.r2.js	test/bins/elf/BLE_Beacon2.NRF51822_OTA.bin	needs domain confirmation	pending	scripts/whatarch.r2.js
+agentic	reasoning.decompiler.policy	reasoning_task	Which decompiler command should long reasoning tasks prefer when user plugins have ABI mismatches: pdc, pdd, or no decompiler by default?	pdc @ main	various	environment-dependent plugin behavior	pending	libr/core
+agentic	r2cmd.write_commands	r2cmd	Should destructive write commands such as wx/wv/wa be generated only with malloc:// fixtures and explicit write-mode checks?	wx 90 @ entry0	malloc://64	prevent unsafe training examples	pending	libr/core

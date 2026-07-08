@@ -1,0 +1,68 @@
+[
+  {
+    "id": "r2js.inline.eval_expression",
+    "kind": "r2js",
+    "question": "How do I run a small JavaScript snippet inside radare2 and call an r2 math command?",
+    "answer": "js console.log(r2.cmd(\"?v 2+3\").trim())",
+    "script": "console.log(r2.cmd(\"?v 2+3\").trim());",
+    "fixture": "-",
+    "checks": [
+      {"type": "contains", "value": "0x5"}
+    ],
+    "tags": ["r2js", "inline", "r2.cmd"],
+    "source_refs": ["libr/core/cmd.c:174", "libr/core/cmd.c:1832"]
+  },
+  {
+    "id": "r2js.cmdj.binary_info",
+    "kind": "r2js",
+    "question": "How can an r2js script read JSON binary metadata and print arch/bits?",
+    "answer": "const info = r2.cmdj(\"ij\"); console.log(info.bin.arch + \"/\" + info.bin.bits);",
+    "script": "const info = r2.cmdj(\"ij\");\nconsole.log(info.bin.arch + \"/\" + info.bin.bits);",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "x86/64"}
+    ],
+    "tags": ["r2js", "cmdj", "json", "triage"],
+    "source_refs": ["scripts/whatarch.r2.js", "libr/core/cmd.c:1832"]
+  },
+  {
+    "id": "r2js.cmdj.filter_strings",
+    "kind": "r2js",
+    "question": "How do I parse izj from JavaScript and print the discovered strings?",
+    "answer": "const strings = r2.cmdj(\"izj\"); for (const s of strings) { console.log(s.string); }",
+    "script": "const strings = r2.cmdj(\"izj\");\nfor (const s of strings) {\n  console.log(s.string);\n}",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "Hello"},
+      {"type": "contains", "value": "r2-folks"}
+    ],
+    "tags": ["r2js", "cmdj", "strings"],
+    "source_refs": ["scripts/english.r2.js"]
+  },
+  {
+    "id": "r2js.call_at.peek_header",
+    "kind": "r2js",
+    "question": "How can I run a print command at offset 0 without changing the current seek in r2js?",
+    "answer": "console.log(r2.callAt(\"pxq 8\", 0).trim().split(\"\\n\")[0]);",
+    "script": "console.log(r2.callAt(\"pxq 8\", 0).trim().split(\"\\n\")[0]);",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": ".ELF"}
+    ],
+    "tags": ["r2js", "callAt", "seek"],
+    "source_refs": ["scripts/fixabi.r2.js", "scripts/ex9patch.r2.js"]
+  },
+  {
+    "id": "r2js.whatarch.script",
+    "kind": "r2js",
+    "question": "How do I write an r2js architecture probe that tries several asm.arch and asm.bits combinations?",
+    "answer": "Run the logic from scripts/whatarch.r2.js: set asm.arch/asm.bits, call pdj, count invalid opcodes, and keep the lowest invalid-count match.",
+    "script": "const architectures = [\n  {arch: \"arm\", bits: [64, 32, 16]},\n  {arch: \"x86\", bits: [64, 32, 16]},\n  {arch: \"mips\", bits: [64, 32, 16]},\n  {arch: \"ppc\", bits: [64, 32]}\n];\nlet bestMatch = {arch: \"\", bits: 0, invalidCount: Infinity};\nfor (const config of architectures) {\n  for (const bit of config.bits) {\n    r2.cmd(`e asm.arch=${config.arch}`);\n    r2.cmd(`e asm.bits=${bit}`);\n    const disasm = r2.cmdj(\"pdj 80\");\n    let invalidCount = 0;\n    for (const instruction of disasm) {\n      if (instruction.opcode === \"invalid\") {\n        invalidCount++;\n      }\n    }\n    console.log(`Testing ${config.arch}-${bit}: ${invalidCount} invalid instructions`);\n    if (invalidCount < bestMatch.invalidCount) {\n      bestMatch = {arch: config.arch, bits: bit, invalidCount};\n    }\n  }\n}\nconsole.log(`Best match: ${bestMatch.arch}-${bestMatch.bits}`);\nr2.cmd(`e asm.arch=${bestMatch.arch}`);\nr2.cmd(`e asm.bits=${bestMatch.bits}`);",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "Best match: x86-64"}
+    ],
+    "tags": ["r2js", "architecture", "analysis"],
+    "source_refs": ["scripts/whatarch.r2.js"]
+  }
+]

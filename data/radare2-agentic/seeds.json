@@ -1,0 +1,130 @@
+[
+  {
+    "id": "r2cmd.info.arch_bits",
+    "kind": "r2cmd",
+    "question": "How can I confirm the target CPU architecture and bit width for this binary?",
+    "answer": "i~arch,bits",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "arch     x86"},
+      {"type": "contains", "value": "bits     64"}
+    ],
+    "tags": ["info", "triage", "elf"],
+    "source_refs": ["libr/core/cmd_info.inc.c", "doc/intro.md"]
+  },
+  {
+    "id": "r2cmd.info.pe_format",
+    "kind": "r2cmd",
+    "question": "I need to know whether this sample is a PE file. Which r2 command should I run?",
+    "answer": "i~format",
+    "fixture": "test/bins/pe/tiny.exe",
+    "checks": [
+      {"type": "contains", "value": "format   pe"}
+    ],
+    "tags": ["info", "triage", "pe"],
+    "source_refs": ["libr/core/cmd_info.inc.c"]
+  },
+  {
+    "id": "r2cmd.imports.find_puts",
+    "kind": "r2cmd",
+    "question": "How do I check whether the binary imports puts?",
+    "answer": "ii~puts",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "puts"}
+    ],
+    "tags": ["imports", "elf"],
+    "source_refs": ["libr/core/cmd_info.inc.c"]
+  },
+  {
+    "id": "r2cmd.strings.find_hello",
+    "kind": "r2cmd",
+    "question": "How can I find the Hello string in the binary strings table?",
+    "answer": "iz~Hello",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "Hello"}
+    ],
+    "tags": ["strings", "elf"],
+    "source_refs": ["libr/core/cmd_info.inc.c"]
+  },
+  {
+    "id": "r2cmd.analysis.list_main",
+    "kind": "r2cmd",
+    "question": "After analysis, how do I list the discovered main function?",
+    "setup": ["aaa"],
+    "answer": "afl~main",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "main"}
+    ],
+    "tags": ["analysis", "functions", "elf"],
+    "source_refs": ["libr/core/cmd_anal.inc.c"]
+  },
+  {
+    "id": "r2cmd.analysis.biggest_functions",
+    "kind": "r2cmd",
+    "question": "How can I show the largest functions first and keep only the top five?",
+    "setup": ["aaa"],
+    "answer": "afl,size/sort/dec,./head/5,addr/cols/size/name",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "main"},
+      {"type": "contains", "value": "size name"}
+    ],
+    "tags": ["analysis", "functions", "tables"],
+    "source_refs": ["libr/core/cmd_anal.inc.c", "libr/util/table.c"]
+  },
+  {
+    "id": "r2cmd.info.stripped",
+    "kind": "r2cmd",
+    "question": "How do I check if the ELF is stripped?",
+    "answer": "i~stripped",
+    "fixture": "test/bins/elf/elf_stripped",
+    "checks": [
+      {"type": "contains", "value": "stripped true"}
+    ],
+    "tags": ["info", "elf"],
+    "source_refs": ["libr/core/cmd_info.inc.c"]
+  },
+  {
+    "id": "r2cmd.sections.text",
+    "kind": "r2cmd",
+    "question": "How do I locate the executable .text section?",
+    "answer": "iS~text",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": ".text"},
+      {"type": "contains", "value": "-r-x"}
+    ],
+    "tags": ["sections", "elf"],
+    "source_refs": ["libr/core/cmd_info.inc.c"]
+  },
+  {
+    "id": "r2cmd.xrefs.puts",
+    "kind": "r2cmd",
+    "question": "How do I find code references to the imported puts function?",
+    "setup": ["aaa"],
+    "answer": "axt @ sym.imp.puts",
+    "fixture": "test/bins/elf/hello_world",
+    "checks": [
+      {"type": "contains", "value": "CALL"},
+      {"type": "contains", "value": "sym.imp.puts"}
+    ],
+    "tags": ["xrefs", "imports", "analysis"],
+    "source_refs": ["libr/core/cmd_anal.inc.c"]
+  },
+  {
+    "id": "r2cmd.cfg.switch_blocks",
+    "kind": "r2cmd",
+    "question": "How can I inspect the basic blocks of main in a switch-heavy binary?",
+    "setup": ["aaa", "s main"],
+    "answer": "afb.",
+    "fixture": "test/bins/elf/switch-hello-world.elf",
+    "checks": [
+      {"type": "contains", "value": "j 0x"}
+    ],
+    "tags": ["cfg", "switch", "basic-blocks"],
+    "source_refs": ["libr/core/cmd_anal.inc.c"]
+  }
+]
