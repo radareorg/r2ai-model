@@ -20,6 +20,12 @@ make -C training train-agentic CONFIG=config.yaml
 
 # train MiniCPM5 against the merged agentic dataset
 make -C training train-minicpm5
+
+# chat with a trained GGUF through Ollama
+make -C training chat MODEL=radare2-smollm-finetuned.gguf
+
+# serve a trained GGUF through llama.cpp
+make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
 ```
 
 Before custom training, set the config:

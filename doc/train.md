@@ -73,3 +73,27 @@ Train MiniCPM5 with the included config:
 ```sh
 make -C training train-minicpm5
 ```
+
+MiniCPM5 uses the standard Llama causal-LM architecture, but its model card recommends `transformers>=5.6`. The training requirements reflect that floor.
+
+## Chat Or Serve
+
+Use the default small GGUF with Ollama:
+
+```sh
+make -C training chat
+```
+
+Use a specific GGUF from disk:
+
+```sh
+make -C training chat MODEL=radare2-qwen3-4b-finetuned.gguf OLLAMA_MODEL=r2ai-qwen3
+```
+
+Serve the same file with llama.cpp's OpenAI-compatible server:
+
+```sh
+make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf LLAMA_PORT=8080
+```
+
+Then point an OpenAI-compatible client at `http://127.0.0.1:8080/v1`.

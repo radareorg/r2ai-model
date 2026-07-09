@@ -1,0 +1,47 @@
+# MiniCPM5 training configuration for the merged radare2 agentic dataset.
+
+model:
+  name: "openbmb/MiniCPM5-1B"
+  tokenizer: null
+
+dataset:
+  path: "../data/training/radare2_all_agentic_train.jsonl"
+  test_split: 0.1
+
+training:
+  output_dir: "./output-minicpm5"
+  num_train_epochs: 3
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 8
+  learning_rate: 2e-5
+  warmup_steps: 200
+  logging_steps: 50
+  save_steps: 500
+  eval_steps: 500
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+
+quantization:
+  method: "bf16"
+  use_fast_tokenizer: true
+
+platform:
+  linux:
+    use_cuda: true
+    cuda_visible_devices: "0"
+  mac:
+    use_mps: true
+
+export:
+  gguf: true
+  mlx: false
+  output_name: "radare2-minicpm5-1b-finetuned"
+
+lora:
+  use_lora: true
+  r: 16
+  lora_alpha: 32
+  target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]

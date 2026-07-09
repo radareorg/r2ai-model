@@ -33,6 +33,18 @@ To train MiniCPM5 from the merged agentic dataset:
 make -C training train-minicpm5
 ```
 
+To chat with a trained GGUF through Ollama:
+
+```bash
+make -C training chat MODEL=radare2-smollm-finetuned.gguf
+```
+
+To serve a GGUF through llama.cpp:
+
+```bash
+make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
+```
+
 This will:
 1. Create a Python virtual environment
 2. Install all required dependencies
@@ -56,6 +68,8 @@ Edit `config.yaml` to customize:
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning
+
+MiniCPM5 uses the standard Llama causal-LM architecture, but its model card recommends `transformers>=5.6`; the requirements files use that floor.
 
 ## Manual Usage
 
@@ -100,6 +114,8 @@ make -C training train-minicpm5
 make -C training help                 # Show all available targets
 make -C training merge-agentic-dataset # Build merged training JSONL
 make -C training clean                # Clean up environment and outputs
+make -C training chat MODEL=radare2-smollm-finetuned.gguf
+make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
 ```
 
 ## Dataset
