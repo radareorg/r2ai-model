@@ -7,6 +7,9 @@ all:
 agentic:
 	./agentic-dataset.py build
 
+agentic-pending:
+	./agentic-dataset.py pending
+
 agentic-r2cmd:
 	./agentic-dataset.py build --dataset r2cmd
 

@@ -1,0 +1,8 @@
+{
+  "growth_budget": 24,
+  "knowledge_rows": 115,
+  "last_new_rows": 24,
+  "last_pending_rows": 2,
+  "online_mode": "auto",
+  "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized"
+}
