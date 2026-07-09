@@ -5,7 +5,10 @@ all:
 	./review-pending.sh "${TSVFILE}"
 
 agentic:
-	./agentic-dataset.py build
+	@./agentic-dataset.py build --skip-seeds
+
+agentic-verify:
+	@./agentic-dataset.py verify-knowledge
 
 agentic-pending:
 	./agentic-dataset.py pending

@@ -21,20 +21,38 @@ agentic path is opt-in:
 make agentic
 ```
 
-This runs `agentic-dataset.py build`. It still verifies the seed companion
-datasets, but it also grows `data/agentic-knowledge/` as an append-only
-knowledge base. The `ok r2cmd`/`ok r2js` lines are the fixed seed verification
-checks; the `knowledge new rows` section lists the actual newly learned row ids
-and categories for that invocation. Each run deduplicates existing row ids,
+This runs `agentic-dataset.py build --skip-seeds`. It skips the fixed seed
+companion dataset verification and focuses on growing
+`data/agentic-knowledge/` as an append-only knowledge base. The output ends with
+the numeric summary, the per-run shard path when rows were accepted, and a
+`knowledge new rows` section that prints each newly learned row id, category,
+source refs, question, answer, and verification details for that invocation.
+Each run deduplicates existing row ids,
 chooses unseen frontier items, promotes human-reviewed pending answers, runs
-radare2 commands against fixtures under `R2_SOURCE/test/bins`, scans radare2
-source/docs/plugins/r2js scripts, optionally fetches online radare2/book pages,
-and writes accepted rows into the curated aggregate JSONL plus a per-run audit
-shard. The aggregate is deduped by row id and content fingerprint, prunes generic
-fixture-triage rows, rejects navigation-heavy online pages, stores plugin source
+radare2 commands against fixtures under `R2_SOURCE/test/bins`, mines radare2's
+maintained `test/db` regression tests as verified command workflows, mines
+source xrefs, scans radare2 source/docs/plugins/r2js scripts, writes
+source bug-hunt findings to `R2BUGS.md`, optionally fetches online radare2/book pages,
+and writes accepted rows into the curated aggregate JSONL
+plus a per-run audit shard. The aggregate is deduped by row id and content
+fingerprint, prunes generic fixture-triage rows, rejects navigation-heavy online
+pages, stores plugin source
 learning as concise symbol summaries, and extracts only signal-bearing doc lines.
 Local home paths, temp files, and usernames are sanitized; fixture and source
 references are stored relative to `R2_SOURCE`.
+
+To validate registered knowledge explicitly, run:
+
+```sh
+make agentic-verify
+```
+
+This re-runs executable checks stored in `data/agentic-knowledge/knowledge.jsonl`
+and reports `ok knowledge <id>` for rows whose registered command evidence still
+matches. Rows without runnable verification metadata are skipped. To re-run the
+fixed seed companion checks, use `make agentic-r2cmd`, `make agentic-r2js`,
+`make agentic-reasoning`, or call `./agentic-dataset.py build` directly without
+`--skip-seeds`.
 
 Verified companion datasets live in:
 
@@ -44,6 +62,7 @@ Verified companion datasets live in:
   firmware, and vulnerability research tasks.
 * `data/agentic-knowledge/` -> append-only generated knowledge, per-run shards,
   source/book/online/plugin facts, and verified workflows/challenges.
+* `R2BUGS.md` -> generated source bug-hunt leads kept out of training data.
 * `data/agentic-review/` -> agentic-only questions and failed checks for human review.
 
 Useful controls:
@@ -53,7 +72,11 @@ AGENTIC_GROWTH_BUDGET=64 AGENTIC_SECTION_BUDGET=6 make agentic
 AGENTIC_ONLINE=off make agentic
 AGENTIC_ONLINE=required AGENTIC_ONLINE_URLS=https://book.rada.re/ make agentic
 R2_BOOK_SOURCE=../radare2-book make agentic
+AGENTIC_R2R_ROWS_PER_FILE=2 AGENTIC_R2R_MAX_ROWS_PER_SOURCE=2 AGENTIC_MAX_R2R_TEST_ROWS=500 make agentic
+AGENTIC_MAX_SOURCE_XREF_ROWS=240 make agentic
+AGENTIC_PRINT_ROW_CONTENT_LIMIT=8000 make agentic
 AGENTIC_DISCOVER_FIXTURES=1 make agentic
+AGENTIC_VERIFY_LIMIT=50 make agentic-verify
 ```
 
 Broad fixture discovery is off by default because it can produce repetitive
@@ -63,7 +86,13 @@ limits how many rows any one growth section can contribute in a run, so the
 agentic loop can stop early instead of filling the budget with low-diversity
 rows. Aggregate category caps such as `AGENTIC_MAX_PLUGIN_SOURCE_ROWS`,
 `AGENTIC_MAX_SOURCE_DOC_ROWS`, and `AGENTIC_MAX_WORKFLOW_ROWS` prevent saturated
-sections from growing forever.
+sections from growing forever. The r2r regression-test frontier is enabled by
+default, walks `test/db` round-robin across categories, verifies every promoted
+row with local radare2 output, caps rows per regression source by default, and
+stores only relative test/fixture references. Source-xref rows describe stable
+API families without file/line references. Source bug-hunt findings are written
+to `R2BUGS.md` instead of the training knowledge base, and they do not claim a
+vulnerability without a reproducer.
 
 When agentic checks need human confirmation, run:
 

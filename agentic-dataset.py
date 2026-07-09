@@ -10,6 +10,7 @@ import html
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,9 @@ KNOWLEDGE_RUNS_DIR = KNOWLEDGE_DIR / "runs"
 KNOWLEDGE_PENDING_PATH = KNOWLEDGE_DIR / "pending-human.jsonl"
 KNOWLEDGE_INDEX_PATH = KNOWLEDGE_DIR / "index.json"
 HUMAN_RESPONSES_PATH = ROOT / "data" / "agentic-review" / "human-responses.jsonl"
+R2BUGS_PATH = ROOT / "R2BUGS.md"
+R2BUGS_START = "<!-- agentic-r2bugs:start -->"
+R2BUGS_END = "<!-- agentic-r2bugs:end -->"
 
 DEFAULT_ONLINE_URLS = [
     "https://book.rada.re/",
@@ -65,6 +69,82 @@ DATASETS = {
 }
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][A-Za-z0-9]")
+R2_URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+R2R_TEST_CATEGORIES = ("cmd", "anal", "asm", "esil", "formats", "io", "json")
+R2R_SKIP_TEST_FILES = {
+    "cmd/cmd_system",
+    "cmd/posixshell",
+    "cmd/shell",
+    "cmd/slow",
+    "cmd/task",
+    "io/http",
+}
+R2R_SAFE_URI_PREFIXES = ("malloc://", "hex://", "null://")
+SOURCE_SCAN_ROOTS = ("libr/core", "libr/main", "libr/bin", "libr/io", "libr/util", "libr/include")
+SOURCE_XREF_TARGETS = [
+    {
+        "term": "r_core_cmd",
+        "topic": "xref.command_parser",
+        "title": "Command parser API xrefs",
+        "guidance": "Command parser APIs intentionally interpret separators, quotes, temporary seeks, and shell-style syntax for radare2 oneliners. Treat this as a bug only when command parsing is an undesired side effect across an API boundary; prefer r_core_call or call_at when literal command semantics are required.",
+        "tags": ["xref", "command-parser", "command-parser-semantics"],
+    },
+    {
+        "term": "r_core_call",
+        "topic": "xref.safe_core_call",
+        "title": "Core call API xrefs",
+        "guidance": "Core call APIs are the safer comparison point for command execution because they avoid reparsing full command lines in many cases. Use these xrefs to learn safer command invocation patterns.",
+        "tags": ["xref", "command-parser", "safe-api"],
+    },
+    {
+        "term": "r_sys_cmd",
+        "topic": "xref.shell_command",
+        "title": "Shell command API xrefs",
+        "guidance": "Shell command APIs must be checked against sandbox state and shell escaping. Audit whether file names, URLs, package names, or binary-controlled strings reach the shell.",
+        "tags": ["xref", "shell", "injection-audit"],
+    },
+    {
+        "term": "r_str_sanitize",
+        "topic": "xref.sanitizers",
+        "title": "String sanitizer xrefs",
+        "guidance": "Sanitizer xrefs show how radare2 converts unsafe strings for names, shell use, or display. Audit whether the sanitizer matches the sink rather than assuming one filter is valid everywhere.",
+        "tags": ["xref", "sanitizer", "defensive-api"],
+    },
+    {
+        "term": "r_name_filter",
+        "topic": "xref.name_filter",
+        "title": "Name filter xrefs",
+        "guidance": "Name filtering is relevant when binary-controlled symbols, flags, or generated script identifiers are emitted. Audit whether output can be reparsed as commands or scripts.",
+        "tags": ["xref", "name-filter", "script-output"],
+    },
+    {
+        "term": "r_cons_printf",
+        "topic": "xref.console_output",
+        "title": "Console output xrefs",
+        "guidance": "Console output is usually display-only, but script-producing commands and star suffixes can turn printed strings into commands. Audit whether binary-controlled data is escaped before script output.",
+        "tags": ["xref", "console", "script-output"],
+    },
+]
+BUG_HUNT_PATTERNS = [
+    {
+        "name": "shell-command-injection",
+        "regex": r"\br_sys_cmd(?:f|_str|_strf|dbg)?\b",
+        "guidance": "Audit shell sinks for sandbox checks and shell escaping. Treat paths, URLs, package names, editor commands, and environment values as attacker-controlled until proven otherwise.",
+        "tags": ["bug-hunt", "shell", "injection-audit"],
+    },
+    {
+        "name": "script-output-escaping",
+        "regex": r"\br_cons_printf\s*\(",
+        "guidance": "Audit printed output that may be consumed by star commands, generated scripts, projects, or command replay. Binary-controlled strings should be filtered with the sanitizer matching the output language.",
+        "tags": ["bug-hunt", "script-output", "escaping"],
+    },
+    {
+        "name": "todo-memory-safety",
+        "regex": r"\b(?:TODO|XXX)\b.*\b(?:leak|overflow|bounds|sanitize|crash|NULL|null|memory|uaf|free)\b",
+        "guidance": "Audit the TODO/XXX note as a lead only. Confirm ownership, bounds, nullability, and test coverage before treating it as a bug.",
+        "tags": ["bug-hunt", "memory-safety", "todo"],
+    },
+]
 
 
 @dataclass
@@ -160,6 +240,10 @@ def safe_id_part(value: str) -> str:
     return value.strip("._-") or "item"
 
 
+def is_r2_uri_fixture(value: str) -> bool:
+    return bool(R2_URI_RE.match(value))
+
+
 def reuse_stable_verification_fields(path: Path, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     old = rows_by_id(read_jsonl(path))
     for row in rows:
@@ -200,8 +284,8 @@ def write_verified_jsonl(path: Path, rows: list[dict[str, Any]]) -> bool:
 
 
 def fixture_path(entry: dict[str, Any], r2_source: Path) -> str:
-    fixture = entry.get("fixture", "-")
-    if fixture in ("-", "--"):
+    fixture = str(entry.get("fixture", "-"))
+    if fixture in ("-", "--") or is_r2_uri_fixture(fixture):
         return fixture
     path = Path(fixture)
     if path.is_absolute():
@@ -314,6 +398,7 @@ def build_r2_args(entry: dict[str, Any], r2_bin: Path, r2_source: Path, script_f
     args = [str(r2_bin), "-2", "-NN", "-q", "-e", "scr.color=0"]
     if entry.get("analyze_on_open"):
         args.append("-A")
+    args.extend(str(arg) for arg in entry.get("r2_args", []))
     if script_file:
         args.extend(["-i", script_file])
     for setup in entry.get("setup", []):
@@ -629,11 +714,14 @@ def knowledge_messages(question: str, answer: str) -> list[dict[str, str]]:
     ]
 
 
-def build_help_knowledge(r2_bin: Path, r2_source: Path, timeout: int) -> list[dict[str, Any]]:
+def build_help_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str] | None = None) -> list[dict[str, Any]]:
     rows = []
     for topic, command, title, refs in HELP_TOPICS:
+        row_id = f"knowledge.{topic}"
+        if seen is not None and row_id in seen:
+            continue
         entry = {
-            "id": f"knowledge.{topic}",
+            "id": row_id,
             "kind": "r2cmd",
             "answer": command,
             "fixture": "--",
@@ -644,7 +732,7 @@ def build_help_knowledge(r2_bin: Path, r2_source: Path, timeout: int) -> list[di
             continue
         answer = output_excerpt(sanitize_text(verification.output, r2_source), 1800)
         rows.append({
-            "id": f"knowledge.{topic}",
+            "id": row_id,
             "kind": "agentic_knowledge",
             "topic": topic,
             "source_refs": refs,
@@ -673,19 +761,22 @@ def summarize_r2js_script(path: Path) -> tuple[str, list[str]]:
     return summary, apis
 
 
-def build_r2js_script_knowledge(r2_source: Path) -> list[dict[str, Any]]:
+def build_r2js_script_knowledge(r2_source: Path, seen: set[str] | None = None) -> list[dict[str, Any]]:
     scripts_dir = r2_source / "scripts"
     if not scripts_dir.is_dir():
         return []
     rows = []
     for path in sorted(scripts_dir.glob("*.r2.js")):
+        row_id = "knowledge.r2js.script." + path.stem.replace(".", "_")
+        if seen is not None and row_id in seen:
+            continue
         summary, apis = summarize_r2js_script(path)
         if not apis:
             continue
         ref = relative_to_r2_source(str(path), r2_source)
         answer = f"`{ref}` is an r2js script. Summary: {summary}. Observed r2 APIs: {', '.join('r2.' + api for api in apis)}."
         rows.append({
-            "id": "knowledge.r2js.script." + path.stem.replace(".", "_"),
+            "id": row_id,
             "kind": "agentic_knowledge",
             "topic": "r2js.script",
             "source_refs": [ref],
@@ -848,6 +939,13 @@ def set_assistant_text(row: dict[str, Any], content: str) -> None:
             return
 
 
+def primary_source_ref(row: dict[str, Any]) -> str:
+    refs = row.get("source_refs", [])
+    if isinstance(refs, list) and refs:
+        return str(refs[0])
+    return ""
+
+
 def normalized_knowledge_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"0x[0-9a-f]+", "0x", text)
@@ -913,6 +1011,20 @@ def cleanup_knowledge_row(row: dict[str, Any]) -> dict[str, Any] | None:
         set_assistant_text(row, answer)
     if topic == "plugin.source" and code_line_density(answer) > 0.25:
         return None
+    if topic == "xref.command_parser":
+        answer = answer.replace('Command parser APIs interpret separators, quotes, temporary seeks, and shell escapes. Audit variable-controlled uses carefully and prefer r_core_call or call_at style APIs when a literal command is not required.', 'Command parser APIs intentionally interpret separators, quotes, temporary seeks, and shell-style syntax for radare2 oneliners. Treat this as a bug only when command parsing is an undesired side effect across an API boundary; prefer r_core_call or call_at when literal command semantics are required.')
+        set_assistant_text(row, answer)
+        tags = row.get("tags", [])
+        if isinstance(tags, list):
+            row["tags"] = ["command-parser-semantics" if tag == "injection-audit" else tag for tag in tags]
+    if topic.startswith("audit."):
+        return None
+    if topic.startswith("xref."):
+        refs = row.get("source_refs", [])
+        if isinstance(refs, list) and any(str(ref).startswith("libr/") for ref in refs):
+            return None
+        if "`libr/" in answer or "Representative xrefs:" in answer:
+            return None
     if len(normalized_knowledge_text(answer)) < 50 and not topic.startswith("human."):
         return None
     row["content_fingerprint"] = knowledge_fingerprint(row)
@@ -927,6 +1039,8 @@ def knowledge_category_limits() -> dict[str, int]:
         "r2js": int(os.environ.get("AGENTIC_MAX_R2JS_ROWS", "80")),
         "radare2-plugin-source": int(os.environ.get("AGENTIC_MAX_PLUGIN_SOURCE_ROWS", "64")),
         "radare2-source-docs": int(os.environ.get("AGENTIC_MAX_SOURCE_DOC_ROWS", "80")),
+        "radare2-source-xrefs": int(os.environ.get("AGENTIC_MAX_SOURCE_XREF_ROWS", "160")),
+        "radare2-regression-tests": int(os.environ.get("AGENTIC_MAX_R2R_TEST_ROWS", "240")),
         "verified-workflows": int(os.environ.get("AGENTIC_MAX_WORKFLOW_ROWS", "80")),
     }
 
@@ -936,7 +1050,9 @@ def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen_ids: set[str] = set()
     seen_fingerprints: set[str] = set()
     category_counts: dict[str, int] = {}
+    r2r_source_counts: dict[str, int] = {}
     category_limits = knowledge_category_limits()
+    r2r_max_rows_per_source = int(os.environ.get("AGENTIC_R2R_MAX_ROWS_PER_SOURCE", "2"))
     for row in rows:
         cleaned = cleanup_knowledge_row(row)
         if not cleaned:
@@ -944,6 +1060,10 @@ def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         category = knowledge_category(cleaned)
         if category_counts.get(category, 0) >= category_limits.get(category, 1_000_000):
             continue
+        if category == "radare2-regression-tests" and r2r_max_rows_per_source > 0:
+            source_ref = primary_source_ref(cleaned)
+            if source_ref and r2r_source_counts.get(source_ref, 0) >= r2r_max_rows_per_source:
+                continue
         row_id = str(cleaned.get("id", ""))
         fingerprint = str(cleaned.get("content_fingerprint", ""))
         if row_id in seen_ids or fingerprint in seen_fingerprints:
@@ -952,6 +1072,10 @@ def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen_ids.add(row_id)
         seen_fingerprints.add(fingerprint)
         category_counts[category] = category_counts.get(category, 0) + 1
+        if category == "radare2-regression-tests":
+            source_ref = primary_source_ref(cleaned)
+            if source_ref:
+                r2r_source_counts[source_ref] = r2r_source_counts.get(source_ref, 0) + 1
     return deduped
 
 
@@ -994,6 +1118,10 @@ def knowledge_category(row: dict[str, Any]) -> str:
         return "online-radare2-docs"
     if topic.startswith("human."):
         return "human-reviewed"
+    if topic.startswith("xref."):
+        return "radare2-source-xrefs"
+    if topic.startswith("r2r."):
+        return "radare2-regression-tests"
     if row.get("kind") == "agentic_experiment":
         return "verified-workflows"
     return topic.split(".", 1)[0]
@@ -1007,6 +1135,80 @@ def count_by_category(rows: list[dict[str, Any]]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def row_message_content(row: dict[str, Any], role: str) -> str:
+    for message in row.get("messages", []):
+        if isinstance(message, dict) and message.get("role") == role:
+            return str(message.get("content", "")).strip()
+    return ""
+
+
+def clipped_print_text(text: str, limit: int) -> str:
+    text = text.strip()
+    if limit > 0 and len(text) > limit:
+        return text[:limit].rstrip() + "\n[truncated]"
+    return text
+
+
+def print_indented_text(text: str, indent: str, limit: int) -> None:
+    text = clipped_print_text(text, limit)
+    if not text:
+        print(indent + "<empty>")
+        return
+    for line in text.splitlines():
+        print(indent + line)
+
+
+def verification_check_summary(checks: Any) -> str:
+    if not isinstance(checks, list) or not checks:
+        return ""
+    parts = []
+    for check in checks[:4]:
+        if not isinstance(check, dict):
+            continue
+        ctype = str(check.get("type", "check"))
+        value = str(check.get("value", check.get("path", ""))).replace("\n", " ")
+        passed = "ok" if check.get("passed") else "pending"
+        parts.append(f"{ctype}({value})={passed}" if value else f"{ctype}={passed}")
+    if len(checks) > 4:
+        parts.append(f"+{len(checks) - 4} more")
+    return "; ".join(parts)
+
+
+def print_knowledge_row_content(row: dict[str, Any]) -> None:
+    limit = int(os.environ.get("AGENTIC_PRINT_ROW_CONTENT_LIMIT", "4000"))
+    refs = row.get("source_refs", [])
+    if isinstance(refs, list) and refs:
+        print("    sources: " + ", ".join(map(str, refs)))
+    if row.get("title"):
+        print(f"    title: {row.get('title')}")
+    question = row_message_content(row, "user")
+    answer = row_message_content(row, "assistant")
+    print("    question:")
+    print_indented_text(question, "      ", limit)
+    print("    answer:")
+    print_indented_text(answer, "      ", limit)
+    verification = row.get("verification")
+    if isinstance(verification, dict):
+        status = verification.get("status")
+        returncode = verification.get("returncode")
+        details = []
+        if status is not None:
+            details.append(f"status={status}")
+        if returncode is not None:
+            details.append(f"returncode={returncode}")
+        check_summary = verification_check_summary(verification.get("checks"))
+        if check_summary:
+            details.append(f"checks={check_summary}")
+        if details:
+            print("    verification: " + "; ".join(details))
+        command_line = verification.get("command_line")
+        if isinstance(command_line, list) and command_line:
+            print("    command: " + " ".join(map(str, command_line)))
+        if verification.get("output_excerpt"):
+            print("    output excerpt:")
+            print_indented_text(str(verification.get("output_excerpt", "")), "      ", min(limit, 1200))
+
+
 def print_new_knowledge_rows(rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]]) -> None:
     if rows:
         print("knowledge new rows:")
@@ -1016,10 +1218,11 @@ def print_new_knowledge_rows(rows: list[dict[str, Any]], pending_rows: list[dict
             if isinstance(refs, list) and refs:
                 ref = f" [{refs[0]}]"
             print(f"  + {knowledge_category(row)} {row.get('id', '<missing-id>')}: {row.get('topic', row.get('kind', ''))}{ref}")
+            print_knowledge_row_content(row)
         counts = ", ".join(f"{name}={count}" for name, count in count_by_category(rows).items())
         print(f"knowledge new categories: {counts}")
     else:
-        print("knowledge new rows: none")
+        print("knowledge new rows: none (all current candidates were duplicates, capped, unsafe, or below the quality threshold)")
     if pending_rows:
         print("knowledge pending rows:")
         for row in pending_rows:
@@ -1061,10 +1264,16 @@ def clean_run_shards(allowed_rows: list[dict[str, Any]] | None = None) -> None:
                 row for row in rows
                 if str(row.get("id", "")) in allowed_ids or str(row.get("content_fingerprint", "")) in allowed_fingerprints
             ]
+        if not rows:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
         write_jsonl_if_changed(path, rows)
 
 
-def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]], args: argparse.Namespace) -> tuple[int, int, list[dict[str, Any]]]:
+def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]], args: argparse.Namespace) -> tuple[int, int, list[dict[str, Any]], Path | None]:
     clean_run_shards()
     existing = merge_rows(read_jsonl(KNOWLEDGE_PATH), [])
     existing_ids = {str(row.get("id")) for row in existing if row.get("id")}
@@ -1076,6 +1285,7 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
         fingerprint = str(row.get("content_fingerprint", ""))
         if row_id not in existing_ids and fingerprint not in existing_fingerprints:
             accepted_new.append(row)
+    run_path = None
     if accepted_new:
         run_path = next_run_path()
         write_jsonl(run_path, accepted_new)
@@ -1102,12 +1312,17 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
             "prune generic fixture.triage rows unless explicitly retained elsewhere",
             "reject navigation-heavy online pages",
             "keep plugin rows as concise symbol summaries, not raw source dumps",
-            "source docs use signal extraction instead of full-file excerpts"
+            "source docs use signal extraction instead of full-file excerpts",
+            "cap regression-test rows per source file to avoid low-entropy growth",
+            "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
         ],
         "growth_sections": [
             "human-reviewed pending answers",
             "radare2 command help",
             "verified workflows and challenges",
+            "radare2 source xrefs",
+            "source bug-hunt report in R2BUGS.md",
+            "radare2 regression tests from test/db",
             "radare2 source documentation",
             "radare2 plugin source",
             "local radare2 book",
@@ -1118,7 +1333,7 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
     }
     KNOWLEDGE_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    return len(accepted_new), len(aggregate), accepted_new
+    return len(accepted_new), len(aggregate), accepted_new, run_path
 
 
 def verification_summary(verification: Verification, r2_source: Path, r2_bin: Path) -> dict[str, Any]:
@@ -1316,6 +1531,521 @@ def discover_fixture_triage_plans(r2_source: Path, seen: set[str], limit: int) -
     return plans
 
 
+
+
+def iter_source_scan_files(r2_source: Path) -> list[Path]:
+    paths: list[Path] = []
+    for root_name in SOURCE_SCAN_ROOTS:
+        root = r2_source / root_name
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.suffix not in {".c", ".h", ".inc", ".inc.c"}:
+                continue
+            try:
+                if path.stat().st_size > 500_000:
+                    continue
+            except OSError:
+                continue
+            paths.append(path)
+    return paths
+
+
+def source_signal_line(line: str) -> str:
+    apis = re.findall(r"\b(?:r|R)_[A-Za-z0-9_]+\b", line)
+    markers = []
+    if "%s" in line:
+        markers.append("format-%s")
+    if "TODO" in line:
+        markers.append("TODO")
+    if "XXX" in line:
+        markers.append("XXX")
+    if "*" in line and "printf" in line:
+        markers.append("formatted-output")
+    parts = []
+    compact = re.sub(r"\s+", " ", line.strip())[:120]
+    if apis:
+        parts.append("apis=" + ",".join(sorted(set(apis))[:6]))
+    if markers:
+        parts.append("markers=" + ",".join(markers))
+    if "TODO" in line or "XXX" in line:
+        parts.append("note=" + compact)
+    if not parts:
+        parts.append("signal=" + compact[:90])
+    return "; ".join(parts)
+
+
+def collect_source_hits(r2_source: Path, regex: str, limit_files: int = 40, max_lines_per_file: int = 3) -> list[dict[str, Any]]:
+    pattern = re.compile(regex)
+    hits: list[dict[str, Any]] = []
+    for path in iter_source_scan_files(r2_source):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        ref = relative_to_r2_source(str(path), r2_source)
+        line_hits = []
+        for lineno, line in enumerate(lines, 1):
+            if not pattern.search(line):
+                continue
+            line_hits.append({"line": lineno, "summary": source_signal_line(line)})
+            if len(line_hits) >= max_lines_per_file:
+                break
+        if line_hits:
+            hits.append({"ref": ref, "hits": line_hits})
+            if len(hits) >= limit_files:
+                break
+    return hits
+
+
+def source_scan_verification(regex: str, hits: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "status": "source-scan-ok",
+        "checks": [{"type": "source_regex", "value": regex, "passed": bool(hits)}],
+        "source_file_count": len(hits),
+        "source_hit_count": sum(len(item.get("hits", [])) for item in hits),
+    }
+
+
+def source_scan_signal_summary(hits: list[dict[str, Any]], limit: int = 8) -> str:
+    api_counts: dict[str, int] = {}
+    marker_counts: dict[str, int] = {}
+    signal_examples: list[str] = []
+    for item in hits:
+        for hit in item.get("hits", []):
+            summary = str(hit.get("summary", ""))
+            for part in summary.split("; "):
+                if part.startswith("apis="):
+                    for api in part.removeprefix("apis=").split(","):
+                        if api:
+                            api_counts[api] = api_counts.get(api, 0) + 1
+                elif part.startswith("markers="):
+                    for marker in part.removeprefix("markers=").split(","):
+                        if marker:
+                            marker_counts[marker] = marker_counts.get(marker, 0) + 1
+                elif part and part not in signal_examples:
+                    signal_examples.append(part)
+    lines = []
+    if api_counts:
+        apis = ", ".join(api for api, _ in sorted(api_counts.items(), key=lambda item: (-item[1], item[0]))[:limit])
+        lines.append(f"Observed API variants: {apis}.")
+    if marker_counts:
+        markers = ", ".join(marker for marker, _ in sorted(marker_counts.items(), key=lambda item: (-item[1], item[0]))[:limit])
+        lines.append(f"Observed sink markers: {markers}.")
+    if signal_examples:
+        lines.append("Representative signal shapes: " + "; ".join(signal_examples[:4]) + ".")
+    if not lines:
+        lines.append("The scan matched the configured source pattern, but no stable non-location signal summary was extracted.")
+    return "\n".join(lines)
+
+
+def source_scan_ref(kind: str, name: str) -> str:
+    return f"radare2-{kind}:{safe_id_part(name)}"
+
+
+def existing_r2r_source_counts() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in merge_rows(read_jsonl(KNOWLEDGE_PATH), []):
+        if knowledge_category(row) != "radare2-regression-tests":
+            continue
+        ref = primary_source_ref(row)
+        if ref:
+            counts[ref] = counts.get(ref, 0) + 1
+    return counts
+
+
+def build_source_xref_knowledge(r2_source: Path, seen: set[str], limit: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for target in SOURCE_XREF_TARGETS:
+        if len(rows) >= limit:
+            break
+        term = str(target["term"])
+        hits = collect_source_hits(r2_source, r"\b" + re.escape(term) + r"[A-Za-z0-9_]*\b", 24, 2)
+        if not hits:
+            continue
+        row_id = f"knowledge.xref.{safe_id_part(term)}"
+        if row_id in seen:
+            continue
+        hit_count = sum(len(item.get("hits", [])) for item in hits)
+        stable_ref = source_scan_ref("api", term)
+        answer = (
+            f"A current radare2 source scan found `{term}`-family usage with {hit_count} signal hits across {len(hits)} files. "
+            "The training row intentionally omits file and line references because the codebase changes frequently.\n\n"
+            f"Stable signal summary:\n{source_scan_signal_summary(hits)}\n\n"
+            f"Agentic use: {target['guidance']} Re-run the source scan on the target checkout when exact locations are needed."
+        )
+        rows.append(knowledge_row(
+            row_id,
+            str(target["topic"]),
+            f"How should a radare2 agent reason about the `{term}` API family?",
+            answer,
+            [stable_ref],
+            r2_source,
+            tags=list(target.get("tags", [])),
+            verification=source_scan_verification(term, hits),
+            title=str(target["title"]),
+        ))
+        seen.add(row_id)
+    return rows
+
+
+def r2bugs_report_block(r2_source: Path) -> tuple[str, int]:
+    sections: list[str] = []
+    for pattern in BUG_HUNT_PATTERNS:
+        name = str(pattern["name"])
+        regex = str(pattern["regex"])
+        hits = collect_source_hits(r2_source, regex, 48, 3)
+        if not hits:
+            continue
+        verification = source_scan_verification(regex, hits)
+        summary = source_scan_signal_summary(hits).replace("\n", "\n  ")
+        sections.append(
+            "\n".join([
+                f"## {name}",
+                "",
+                "Status: unconfirmed source-audit lead. This is not a vulnerability claim until a reproducer or patch proves the risk.",
+                f"Stable ref: `radare2-audit:{safe_id_part(name)}`",
+                f"Pattern: `{regex}`",
+                f"Current scan: {verification['source_hit_count']} signals across {verification['source_file_count']} files.",
+                "",
+                "Stable signal summary:",
+                f"  {summary}",
+                "",
+                f"Audit guidance: {pattern['guidance']}",
+                "",
+                "Verification required before fixing or filing:",
+                "- Re-run the scan on the target radare2 checkout.",
+                "- Trace whether user-controlled or binary-controlled input reaches the sink.",
+                "- Confirm the behavior with a minimal r2/r2r reproducer or a narrowly scoped source patch.",
+            ])
+        )
+    body = "\n\n".join(sections) if sections else "No source-audit leads matched the current scan patterns."
+    block = (
+        f"{R2BUGS_START}\n"
+        "This block is generated by `make agentic`. Keep manual notes outside the markers.\n"
+        "Source bug findings are intentionally kept out of the training knowledge base.\n\n"
+        f"{body}\n"
+        f"{R2BUGS_END}\n"
+    )
+    return block, len(sections)
+
+
+def write_text_if_changed(path: Path, text: str) -> bool:
+    try:
+        if path.read_text(encoding="utf-8") == text:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
+def write_r2bugs_report(r2_source: Path) -> tuple[int, bool]:
+    block, count = r2bugs_report_block(r2_source)
+    header = (
+        "# R2BUGS\n\n"
+        "Potential radare2 source bugs and source-audit leads found by agentic scans.\n"
+        "Confirmed bugs should include a reproducer, impact notes, and fix status.\n"
+    )
+    try:
+        current = R2BUGS_PATH.read_text(encoding="utf-8")
+    except OSError:
+        current = header + "\n"
+    if R2BUGS_START in current and R2BUGS_END in current:
+        before = current.split(R2BUGS_START, 1)[0].rstrip()
+        after = current.split(R2BUGS_END, 1)[1].lstrip()
+        text = before + "\n\n" + block
+        if after:
+            text += "\n" + after
+    else:
+        text = current.rstrip() + "\n\n" + block
+    return count, write_text_if_changed(R2BUGS_PATH, text)
+
+
+def iter_r2r_test_files(r2_source: Path, source_counts: dict[str, int] | None = None) -> list[Path]:
+    base = r2_source / "test" / "db"
+    if not base.is_dir():
+        return []
+    buckets: list[list[Path]] = []
+    for category in R2R_TEST_CATEGORIES:
+        root = base / category
+        if not root.is_dir():
+            continue
+        category_paths: list[Path] = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                ref = path.resolve().relative_to(base.resolve()).as_posix()
+                if ref in R2R_SKIP_TEST_FILES or path.stat().st_size > 240_000:
+                    continue
+            except OSError:
+                continue
+            category_paths.append(path)
+        if category_paths:
+            buckets.append(category_paths)
+    paths: list[Path] = []
+    max_len = max((len(bucket) for bucket in buckets), default=0)
+    for index in range(max_len):
+        for bucket in buckets:
+            if index < len(bucket):
+                paths.append(bucket[index])
+    if source_counts:
+        indexed_paths = list(enumerate(paths))
+        indexed_paths.sort(key=lambda item: (source_counts.get(relative_to_r2_source(str(item[1]), r2_source), 0), item[0]))
+        paths = [path for _, path in indexed_paths]
+    return paths
+
+
+def parse_r2r_test_file(path: Path) -> list[dict[str, str]]:
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    tests: list[dict[str, str]] = []
+    block: dict[str, str] = {}
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        if line.strip() == "RUN":
+            if block:
+                tests.append(block)
+                block = {}
+            idx += 1
+            continue
+        match = re.match(r"^([A-Z0-9_]+)=(.*)$", line)
+        if not match:
+            idx += 1
+            continue
+        key, value = match.group(1), match.group(2)
+        if value == "<<EOF":
+            idx += 1
+            body: list[str] = []
+            while idx < len(lines) and lines[idx] != "EOF":
+                body.append(lines[idx])
+                idx += 1
+            block[key] = "\n".join(body)
+            if idx < len(lines) and lines[idx] == "EOF":
+                idx += 1
+            continue
+        block[key] = value
+        idx += 1
+    if block:
+        tests.append(block)
+    return tests
+
+
+def normalize_r2r_fixture(raw: str, r2_source: Path) -> str | None:
+    fixture = raw.strip() or "-"
+    if fixture in ("-", "--"):
+        return fixture
+    if fixture.startswith("bins/"):
+        fixture = "test/" + fixture
+    if fixture.startswith("test/bins/"):
+        return fixture if (r2_source / fixture).is_file() else None
+    if fixture.startswith(R2R_SAFE_URI_PREFIXES):
+        return fixture
+    return None
+
+
+def safe_r2r_value(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z0-9_.:+,-]+$", value)) and ".." not in value
+
+
+def safe_r2r_eval(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z0-9_.-]+=[A-Za-z0-9_.:+,-]+$", value)) and ".." not in value
+
+
+def safe_r2r_args(raw: str) -> list[str] | None:
+    if not raw.strip():
+        return []
+    try:
+        tokens = shlex.split(raw)
+    except ValueError:
+        return None
+    safe: list[str] = []
+    one_arg = {"-a", "-b", "-B", "-m", "-s", "-k", "-F"}
+    no_arg = {"-A", "-n", "-nn", "-w", "-M", "-1"}
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        if token in no_arg:
+            safe.append(token)
+            idx += 1
+            continue
+        if token == "-e" and idx + 1 < len(tokens) and safe_r2r_eval(tokens[idx + 1]):
+            safe.extend([token, tokens[idx + 1]])
+            idx += 2
+            continue
+        if token.startswith("-e") and safe_r2r_eval(token[2:]):
+            safe.append(token)
+            idx += 1
+            continue
+        if token in one_arg and idx + 1 < len(tokens) and safe_r2r_value(tokens[idx + 1]):
+            safe.extend([token, tokens[idx + 1]])
+            idx += 2
+            continue
+        short = re.match(r"^-(a|b|B|m|s|k|F)(.+)$", token)
+        if short and safe_r2r_value(short.group(2)):
+            safe.append(token)
+            idx += 1
+            continue
+        return None
+    return safe
+
+
+def r2r_commands_from_test(test: dict[str, str]) -> list[str]:
+    raw = test.get("CMDS", "").strip("\n")
+    if len(raw) > 2400:
+        return []
+    commands = [line.rstrip() for line in raw.splitlines()] if "\n" in raw else [raw.strip()]
+    commands = [cmd for cmd in commands if cmd.strip() and not cmd.lstrip().startswith("#")]
+    max_commands = int(os.environ.get("AGENTIC_R2R_MAX_COMMANDS", "14"))
+    if len(commands) > max_commands:
+        return []
+    return commands
+
+
+def is_safe_r2r_command_sequence(commands: list[str], test_ref: str) -> bool:
+    if not commands:
+        return False
+    test_key = test_ref.removeprefix("test/db/")
+    if test_key in R2R_SKIP_TEST_FILES or any(part in test_key for part in ("dbg", "debug")):
+        return False
+    unsafe_needles = (
+        "http://", "https://", "r2.syscmd", "syscmd", "r2pipe.open",
+        "LD_PRELOAD", "/tmp/", "/home/", "{R2_SOURCE}", "${R2_SOURCE}",
+    )
+    for command in commands:
+        stripped = command.strip()
+        if not stripped:
+            continue
+        if stripped in {"q", "q!"}:
+            return False
+        if stripped.startswith(("!", "#!", ":!")) or re.search(r"(^|[;|&])\s*!", stripped):
+            return False
+        if any(needle in stripped for needle in unsafe_needles):
+            return False
+        if re.match(r"^(ood|doo|dc|dcu|ds|dmi|dmh|dp|dk)\b", stripped):
+            return False
+        if re.search(r"\bbins/", stripped):
+            return False
+    return True
+
+
+def r2r_expected_checks(expect: str, r2_source: Path) -> list[dict[str, Any]]:
+    checks: list[dict[str, Any]] = []
+    seen_values: set[str] = set()
+    for raw_line in expect.splitlines():
+        line = sanitize_text(clean_output(raw_line).strip(), r2_source)
+        if not line or len(line) < 3 or len(line) > 180:
+            continue
+        if set(line) <= set("-=_ "):
+            continue
+        if line.startswith(("WARN:", "INFO:")):
+            continue
+        value = line[:160]
+        if value in seen_values:
+            continue
+        checks.append({"type": "contains", "value": value})
+        seen_values.add(value)
+        if len(checks) >= 2:
+            break
+    return checks
+
+
+def r2r_command_family(commands: list[str]) -> str:
+    for command in commands:
+        stripped = command.strip()
+        if not stripped.startswith(("e ", "?e", "? ", "-a", "-b")):
+            return safe_id_part(stripped.split()[0])[:32]
+    return safe_id_part(commands[0].split()[0])[:32]
+
+
+def build_r2r_test_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    source_counts = existing_r2r_source_counts()
+    max_rows_per_source = int(os.environ.get("AGENTIC_R2R_MAX_ROWS_PER_SOURCE", "2"))
+    for path in iter_r2r_test_files(r2_source, source_counts):
+        if len(rows) >= limit:
+            break
+        test_ref = relative_to_r2_source(str(path), r2_source)
+        if max_rows_per_source > 0 and source_counts.get(test_ref, 0) >= max_rows_per_source:
+            continue
+        category = test_ref.split("/")[2] if test_ref.startswith("test/db/") and len(test_ref.split("/")) > 2 else "test"
+        rows_from_file = 0
+        rows_per_file = max(1, int(os.environ.get("AGENTIC_R2R_ROWS_PER_FILE", "1")))
+        for index, test in enumerate(parse_r2r_test_file(path), 1):
+            if len(rows) >= limit or rows_from_file >= rows_per_file:
+                break
+            if test.get("BROKEN") or test.get("EXPECT_ERR"):
+                continue
+            name = test.get("NAME", path.name).strip() or path.name
+            fixture = normalize_r2r_fixture(test.get("FILE", "-"), r2_source)
+            if not fixture:
+                continue
+            r2_args = safe_r2r_args(test.get("ARGS", ""))
+            if r2_args is None:
+                continue
+            commands = r2r_commands_from_test(test)
+            if not is_safe_r2r_command_sequence(commands, test_ref):
+                continue
+            checks = r2r_expected_checks(test.get("EXPECT", ""), r2_source)
+            if not checks:
+                continue
+            row_id = "knowledge.r2r.%s.%03d.%s" % (
+                safe_id_part(test_ref.removeprefix("test/db/").replace("/", ".")),
+                index,
+                stable_hash(name, fixture, "\n".join(commands)),
+            )
+            if row_id in seen:
+                continue
+            if fixture not in ("-", "--") and not is_r2_uri_fixture(fixture) and not Path(fixture_path({"fixture": fixture}, r2_source)).is_file():
+                continue
+            entry = {
+                "id": row_id,
+                "kind": "reasoning_task",
+                "fixture": fixture,
+                "r2_args": r2_args,
+                "starter_commands": commands,
+                "checks": checks,
+                "answer": "",
+                "question": name,
+            }
+            verification = run_entry(entry, r2_bin, r2_source, timeout)
+            seen.add(row_id)
+            if not verification.ok:
+                continue
+            display_commands = "\n".join(f"- `{cmd}`" for cmd in commands)
+            source_refs = [test_ref]
+            if fixture.startswith("test/bins/"):
+                source_refs.append(fixture)
+            expected = "; ".join(str(check["value"]) for check in checks)
+            answer = (
+                f"Radare2 regression test `{test_ref}` named `{name}` verifies a maintained command workflow on `{fixture}`.\n\n"
+                f"Run this command sequence:\n{display_commands}\n\n"
+                f"Expected signal: {expected}. The agent reran the sequence locally and observed matching output.\n\n"
+                f"Evidence excerpt:\n{output_excerpt(sanitize_text(verification.output, r2_source), 1400)}"
+            )
+            family = r2r_command_family(commands)
+            rows.append(knowledge_row(
+                row_id,
+                f"r2r.{category}.{safe_id_part(path.name)}",
+                f"What radare2 workflow is covered by regression test `{test_ref}` / `{name}`?",
+                answer,
+                source_refs,
+                r2_source,
+                tags=["r2r-test", category, family, "verified"],
+                verification=verification_summary(verification, r2_source, r2_bin),
+                title=name,
+                kind="agentic_experiment",
+            ))
+            rows_from_file += 1
+            source_counts[test_ref] = source_counts.get(test_ref, 0) + 1
+    return rows, []
+
+
 def build_experiment_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int, discover_fixtures: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
@@ -1448,7 +2178,11 @@ def build_autonomous_knowledge(r2_bin: Path, r2_source: Path, timeout: int, args
     rows: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
 
-    baseline = human_response_knowledge_rows(r2_source) + build_help_knowledge(r2_bin, r2_source, timeout) + build_r2js_script_knowledge(r2_source)
+    baseline = (
+        human_response_knowledge_rows(r2_source)
+        + build_help_knowledge(r2_bin, r2_source, timeout, seen)
+        + build_r2js_script_knowledge(r2_source, seen)
+    )
     for row in baseline:
         row_id = str(row.get("id", ""))
         if row_id and row_id not in seen and len(rows) < budget:
@@ -1459,6 +2193,8 @@ def build_autonomous_knowledge(r2_bin: Path, r2_source: Path, timeout: int, args
     builders = [
         ("help", lambda n: build_help_frontier(r2_bin, r2_source, timeout, seen, n)),
         ("experiments", lambda n: build_experiment_knowledge(r2_bin, r2_source, timeout, seen, n, args.discover_fixtures)),
+        ("source-xrefs", lambda n: (build_source_xref_knowledge(r2_source, seen, n), [])),
+        ("r2r-tests", lambda n: build_r2r_test_knowledge(r2_bin, r2_source, timeout, seen, n)),
         ("source-docs", lambda n: (build_doc_knowledge(iter_source_docs(r2_source), r2_source, "source", r2_source, seen, n), [])),
         ("plugin-source", lambda n: (build_plugin_source_knowledge(r2_source, seen, n), [])),
         ("book-docs", lambda n: (build_doc_knowledge(iter_local_book_docs(r2_source), Path(os.environ.get("R2_BOOK_SOURCE", str(r2_source.parent / "radare2-book"))), "book", r2_source, seen, n), [])),
@@ -1474,11 +2210,13 @@ def build_autonomous_knowledge(r2_bin: Path, r2_source: Path, timeout: int, args
     return rows, pending
 
 
-def write_knowledge_base(r2_bin: Path, r2_source: Path, timeout: int, args: argparse.Namespace) -> tuple[int, int, int]:
+def write_knowledge_base(r2_bin: Path, r2_source: Path, timeout: int, args: argparse.Namespace) -> tuple[int, int, int, list[dict[str, Any]], list[dict[str, Any]], Path | None]:
+    bug_count, bugs_changed = write_r2bugs_report(r2_source)
+    status = "updated" if bugs_changed else "checked"
+    print(f"r2bugs {status}: {bug_count} source-audit leads in {repo_path_ref(R2BUGS_PATH)}")
     rows, pending = build_autonomous_knowledge(r2_bin, r2_source, timeout, args)
-    new_count, total_count, accepted_rows = write_knowledge_outputs(rows, pending, args)
-    print_new_knowledge_rows(accepted_rows, pending)
-    return new_count, total_count, len(pending)
+    new_count, total_count, accepted_rows, run_path = write_knowledge_outputs(rows, pending, args)
+    return new_count, total_count, len(pending), accepted_rows, pending, run_path
 
 
 def selected_datasets(name: str) -> list[str]:
@@ -1490,31 +2228,40 @@ def selected_datasets(name: str) -> list[str]:
 
 
 def build(args: argparse.Namespace) -> int:
+    if args.skip_seeds and args.dataset != "all":
+        raise SystemExit("--skip-seeds only applies to the full agentic knowledge build")
+
     r2_bin = pick_r2_bin(args.r2_bin)
     r2_source = Path(args.r2_source)
     all_pending: list[dict[str, Any]] = []
-    for dataset in selected_datasets(args.dataset):
-        paths = DATASETS[dataset]
-        seeds = load_json(paths["seed"])
-        verified_rows: list[dict[str, Any]] = []
-        pending_rows: list[dict[str, Any]] = []
-        for entry in seeds:
-            checked_entry, verification = verify_with_repair(entry, r2_bin, r2_source, args.timeout)
-            if verification.ok:
-                verified_rows.append(row_from_entry(checked_entry, verification, r2_source, r2_bin))
-                print(f"ok {dataset} {checked_entry['id']}")
-            else:
-                pending = pending_from_entry(dataset, checked_entry, verification, r2_source)
-                pending_rows.append(pending)
-                all_pending.append(pending)
-                print(f"pending {dataset} {checked_entry.get('id', '')}: {verification.reason or verification.status}")
-        if not args.dry_run:
-            write_verified_jsonl(paths["verified"], verified_rows)
-            write_jsonl_if_changed(paths["pending"], pending_rows)
+    seeds_checked = False
+    if not args.skip_seeds:
+        seeds_checked = True
+        for dataset in selected_datasets(args.dataset):
+            paths = DATASETS[dataset]
+            seeds = load_json(paths["seed"])
+            verified_rows: list[dict[str, Any]] = []
+            pending_rows: list[dict[str, Any]] = []
+            for entry in seeds:
+                checked_entry, verification = verify_with_repair(entry, r2_bin, r2_source, args.timeout)
+                if verification.ok:
+                    verified_rows.append(row_from_entry(checked_entry, verification, r2_source, r2_bin))
+                    print(f"ok {dataset} {checked_entry['id']}")
+                else:
+                    pending = pending_from_entry(dataset, checked_entry, verification, r2_source)
+                    pending_rows.append(pending)
+                    all_pending.append(pending)
+                    print(f"pending {dataset} {checked_entry.get('id', '')}: {verification.reason or verification.status}")
+            if not args.dry_run:
+                write_verified_jsonl(paths["verified"], verified_rows)
+                write_jsonl_if_changed(paths["pending"], pending_rows)
     if not args.dry_run and args.dataset == "all":
-        new_count, total_count, pending_count = write_knowledge_base(r2_bin, r2_source, args.timeout, args)
+        new_count, total_count, pending_count, accepted_rows, pending_rows, run_path = write_knowledge_base(r2_bin, r2_source, args.timeout, args)
         print(f"knowledge agentic {new_count} new rows, {total_count} total rows, {pending_count} pending checks")
-    if not args.dry_run:
+        if run_path:
+            print(f"knowledge run shard {repo_path_ref(run_path)}")
+        print_new_knowledge_rows(accepted_rows, pending_rows)
+    if not args.dry_run and seeds_checked:
         write_human_tsv(ROOT / "data" / "agentic-review" / "generated-failures.tsv", all_pending)
     return 0 if not all_pending else 1
 
@@ -1524,6 +2271,106 @@ def repo_path_ref(path: Path) -> str:
         return path.resolve().relative_to(ROOT.resolve()).as_posix()
     except (OSError, ValueError):
         return path.as_posix()
+
+
+def restore_knowledge_command(command_line: Any, r2_bin: Path) -> tuple[list[str] | None, str]:
+    if not isinstance(command_line, list) or not command_line:
+        return None, "no command_line"
+    args: list[str] = []
+    for idx, raw_arg in enumerate(command_line):
+        arg = str(raw_arg)
+        if arg in {"<generated-r2js-script>", "<tmp-path>", "<home-path>"}:
+            return None, f"cannot restore sanitized placeholder {arg}"
+        if idx == 0 and arg in {"radare2", "r2"}:
+            args.append(str(r2_bin))
+        else:
+            args.append(arg)
+    return args, ""
+
+
+def safe_knowledge_verify_command(args: list[str]) -> tuple[bool, str]:
+    for idx, arg in enumerate(args):
+        if arg != "-c" or idx + 1 >= len(args):
+            continue
+        command = args[idx + 1].strip()
+        if command.startswith(("!", "#!", ":!")) or re.search(r"(^|[;&|])\s*!", command):
+            return False, "stored command invokes a shell escape"
+        if "http://" in command or "https://" in command:
+            return False, "stored command reaches the network"
+    return True, ""
+
+
+def knowledge_output_hashes(output: str, r2_source: Path) -> set[str]:
+    sanitized = sanitize_text(output, r2_source)
+    candidates = {
+        sanitized,
+        output_excerpt(sanitized, 1800),
+        output_excerpt(sanitized, 1200),
+    }
+    return {hashlib.sha256(candidate.encode("utf-8")).hexdigest() for candidate in candidates}
+
+
+def verify_knowledge_row(row: dict[str, Any], r2_bin: Path, r2_source: Path, timeout: int) -> tuple[str, str]:
+    verification = row.get("verification")
+    if not isinstance(verification, dict):
+        return "skipped", "no verification metadata"
+    args, reason = restore_knowledge_command(verification.get("command_line"), r2_bin)
+    if args is None:
+        return "skipped", reason
+    safe, reason = safe_knowledge_verify_command(args)
+    if not safe:
+        return "skipped", reason
+    start = time.monotonic()
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=str(r2_source if r2_source.is_dir() else ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "failed", f"timed out after {timeout}s"
+    elapsed = int((time.monotonic() - start) * 1000)
+    output = clean_output(proc.stdout + proc.stderr)
+    if proc.returncode != 0:
+        return "failed", f"returncode={proc.returncode} elapsed_ms={elapsed}"
+    checks = verification.get("checks")
+    if isinstance(checks, list) and checks:
+        ok, _checked, check_reason = evaluate_checks(output, checks)
+        if not ok:
+            return "failed", check_reason
+    expected_hash = str(verification.get("output_sha256", ""))
+    if expected_hash and expected_hash not in knowledge_output_hashes(output, r2_source):
+        return "failed", "output_sha256 mismatch"
+    return "ok", f"elapsed_ms={elapsed}"
+
+
+def verify_knowledge(args: argparse.Namespace) -> int:
+    r2_bin = pick_r2_bin(args.r2_bin)
+    r2_source = Path(args.r2_source)
+    rows = read_jsonl(KNOWLEDGE_PATH)
+    if args.ids:
+        wanted = set(args.ids)
+        rows = [row for row in rows if str(row.get("id", "")) in wanted]
+    if args.limit > 0:
+        rows = rows[:args.limit]
+
+    counts = {"ok": 0, "failed": 0, "skipped": 0}
+    for row in rows:
+        row_id = str(row.get("id", "<missing-id>"))
+        status, reason = verify_knowledge_row(row, r2_bin, r2_source, args.timeout)
+        counts[status] = counts.get(status, 0) + 1
+        if status == "ok":
+            print(f"ok knowledge {row_id}")
+        elif status == "failed":
+            print(f"failed knowledge {row_id}: {reason}")
+        elif args.verbose:
+            print(f"skipped knowledge {row_id}: {reason}")
+    print(f"knowledge verify {counts['ok']} ok, {counts['failed']} failed, {counts['skipped']} skipped, {len(rows)} checked")
+    return 1 if counts["failed"] else 0
 
 
 def sanitize_obj(value: Any, r2_source: Path) -> Any:
@@ -1768,8 +2615,18 @@ def main(argv: list[str]) -> int:
     build_parser.add_argument("--online", choices=["auto", "off", "required"], default=os.environ.get("AGENTIC_ONLINE", "auto"))
     build_parser.add_argument("--online-timeout", type=float, default=float(os.environ.get("AGENTIC_ONLINE_TIMEOUT", "2.0")))
     build_parser.add_argument("--discover-fixtures", action="store_true", default=os.environ.get("AGENTIC_DISCOVER_FIXTURES", "0").lower() in {"1", "true", "yes", "on"})
+    build_parser.add_argument("--skip-seeds", action="store_true", help="skip fixed seed dataset verification and only grow agentic knowledge")
     build_parser.add_argument("--dry-run", action="store_true")
     build_parser.set_defaults(func=build)
+
+    verify_parser = sub.add_parser("verify-knowledge", help="verify executable checks stored in agentic knowledge")
+    verify_parser.add_argument("--r2-bin", default=None)
+    verify_parser.add_argument("--r2-source", default=str(DEFAULT_R2_SOURCE))
+    verify_parser.add_argument("--timeout", type=int, default=20)
+    verify_parser.add_argument("--limit", type=int, default=int(os.environ.get("AGENTIC_VERIFY_LIMIT", "0")))
+    verify_parser.add_argument("--id", dest="ids", action="append", default=[], help="verify only this knowledge row id; can be repeated")
+    verify_parser.add_argument("--verbose", action="store_true", help="print skipped rows too")
+    verify_parser.set_defaults(func=verify_knowledge)
 
     pending_parser = sub.add_parser("pending", help="manually answer and clear agentic pending rows")
     pending_parser.add_argument("--list", action="store_true", help="list pending rows without prompting")

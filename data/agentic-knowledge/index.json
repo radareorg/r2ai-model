@@ -5,7 +5,9 @@
     "r2-command-help": 29,
     "r2js": 14,
     "radare2-plugin-source": 64,
+    "radare2-regression-tests": 84,
     "radare2-source-docs": 57,
+    "radare2-source-xrefs": 6,
     "verified-workflows": 8
   },
   "category_limits": {
@@ -14,7 +16,9 @@
     "r2-command-help": 80,
     "r2js": 80,
     "radare2-plugin-source": 64,
+    "radare2-regression-tests": 240,
     "radare2-source-docs": 80,
+    "radare2-source-xrefs": 160,
     "verified-workflows": 80
   },
   "discover_fixtures": false,
@@ -23,15 +27,20 @@
     "human-reviewed pending answers",
     "radare2 command help",
     "verified workflows and challenges",
+    "radare2 source xrefs",
+    "source bug-hunt report in R2BUGS.md",
+    "radare2 regression tests from test/db",
     "radare2 source documentation",
     "radare2 plugin source",
     "local radare2 book",
     "online radare2/book resources",
     "r2js scripts"
   ],
-  "knowledge_rows": 177,
-  "last_new_by_category": {},
-  "last_new_rows": 0,
+  "knowledge_rows": 267,
+  "last_new_by_category": {
+    "radare2-regression-tests": 4
+  },
+  "last_new_rows": 4,
   "last_pending_rows": 0,
   "online_mode": "auto",
   "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
@@ -40,7 +49,9 @@
     "prune generic fixture.triage rows unless explicitly retained elsewhere",
     "reject navigation-heavy online pages",
     "keep plugin rows as concise symbol summaries, not raw source dumps",
-    "source docs use signal extraction instead of full-file excerpts"
+    "source docs use signal extraction instead of full-file excerpts",
+    "cap regression-test rows per source file to avoid low-entropy growth",
+    "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
   ],
   "section_budget": 4
 }
