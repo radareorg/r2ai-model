@@ -5,7 +5,7 @@
     "r2-command-help": 29,
     "r2js": 14,
     "radare2-plugin-source": 64,
-    "radare2-regression-tests": 84,
+    "radare2-regression-tests": 96,
     "radare2-source-docs": 57,
     "radare2-source-xrefs": 6,
     "verified-workflows": 8
@@ -36,7 +36,7 @@
     "online radare2/book resources",
     "r2js scripts"
   ],
-  "knowledge_rows": 267,
+  "knowledge_rows": 279,
   "last_new_by_category": {
     "radare2-regression-tests": 4
   },

@@ -12,6 +12,13 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 * data/Attic/ -> already processed files
 * data/sources -> unfiltered data sources to be used to generate questions
 
+## Documentation
+
+* [doc/learn.md](doc/learn.md) -> discover and register new agentic knowledge.
+* [doc/review.md](doc/review.md) -> verify knowledge and handle human review.
+* [doc/train.md](doc/train.md) -> merge datasets, choose a model, and train.
+* [AGENTS.md](AGENTS.md) -> minimal command cheat sheet for agents.
+
 ## Agentic generation
 
 The manual review flow remains the default `make` target. The autonomous
