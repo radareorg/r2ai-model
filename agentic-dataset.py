@@ -69,6 +69,7 @@ DATASETS = {
 }
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[()][A-Za-z0-9]")
+EMAIL_RE = re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}")
 R2_URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 R2R_TEST_CATEGORIES = ("cmd", "anal", "asm", "esil", "formats", "io", "json")
 R2R_SKIP_TEST_FILES = {
@@ -311,6 +312,18 @@ def expand_r2_refs(text: str, r2_source: Path) -> str:
     return text.replace("${R2_SOURCE}", str(r2_source)).replace("{R2_SOURCE}", str(r2_source))
 
 
+def redact_email_like(match: re.Match[str]) -> str:
+    value = match.group(0)
+    local = value.split("@", 1)[0]
+    if "-." in local:
+        return value
+    return "<email>"
+
+
+def redact_emails(text: str) -> str:
+    return EMAIL_RE.sub(redact_email_like, text)
+
+
 def sanitize_text(text: str, r2_source: Path) -> str:
     sanitized = text
     roots = {str(r2_source)}
@@ -325,7 +338,7 @@ def sanitize_text(text: str, r2_source: Path) -> str:
     sanitized = re.sub(r"/tmp/[^\s'\"`]+", "<tmp-path>", sanitized)
     sanitized = re.sub(r"/home/[^/\s]+/[^\s'\"`]*", "<home-path>", sanitized)
     sanitized = re.sub(r"/Users/[^/\s]+/[^\s'\"`]*", "<home-path>", sanitized)
-    sanitized = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+", "<email>", sanitized)
+    sanitized = redact_emails(sanitized)
     sanitized = re.sub(r"\b[pP]ancake\b", "radare2 contributor", sanitized)
     return sanitized
 
@@ -757,7 +770,7 @@ def summarize_r2js_script(path: Path) -> tuple[str, list[str]]:
             comments.append(stripped)
     summary = " ".join(comments[:3]) or f"r2js script using APIs: {', '.join(apis)}"
     summary = re.sub(r"\b[pP]ancake\b", "radare2 contributor", summary)
-    summary = re.sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+", "<email>", summary)
+    summary = redact_emails(summary)
     return summary, apis
 
 
@@ -1040,7 +1053,7 @@ def knowledge_category_limits() -> dict[str, int]:
         "radare2-plugin-source": int(os.environ.get("AGENTIC_MAX_PLUGIN_SOURCE_ROWS", "64")),
         "radare2-source-docs": int(os.environ.get("AGENTIC_MAX_SOURCE_DOC_ROWS", "80")),
         "radare2-source-xrefs": int(os.environ.get("AGENTIC_MAX_SOURCE_XREF_ROWS", "160")),
-        "radare2-regression-tests": int(os.environ.get("AGENTIC_MAX_R2R_TEST_ROWS", "240")),
+        "verified-radare2-workflows": int(os.environ.get("AGENTIC_MAX_R2R_TEST_ROWS", "240")),
         "verified-workflows": int(os.environ.get("AGENTIC_MAX_WORKFLOW_ROWS", "80")),
     }
 
@@ -1060,7 +1073,7 @@ def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         category = knowledge_category(cleaned)
         if category_counts.get(category, 0) >= category_limits.get(category, 1_000_000):
             continue
-        if category == "radare2-regression-tests" and r2r_max_rows_per_source > 0:
+        if category == "verified-radare2-workflows" and r2r_max_rows_per_source > 0:
             source_ref = primary_source_ref(cleaned)
             if source_ref and r2r_source_counts.get(source_ref, 0) >= r2r_max_rows_per_source:
                 continue
@@ -1072,7 +1085,7 @@ def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen_ids.add(row_id)
         seen_fingerprints.add(fingerprint)
         category_counts[category] = category_counts.get(category, 0) + 1
-        if category == "radare2-regression-tests":
+        if category == "verified-radare2-workflows":
             source_ref = primary_source_ref(cleaned)
             if source_ref:
                 r2r_source_counts[source_ref] = r2r_source_counts.get(source_ref, 0) + 1
@@ -1121,7 +1134,7 @@ def knowledge_category(row: dict[str, Any]) -> str:
     if topic.startswith("xref."):
         return "radare2-source-xrefs"
     if topic.startswith("r2r."):
-        return "radare2-regression-tests"
+        return "verified-radare2-workflows"
     if row.get("kind") == "agentic_experiment":
         return "verified-workflows"
     return topic.split(".", 1)[0]
@@ -1313,7 +1326,7 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
             "reject navigation-heavy online pages",
             "keep plugin rows as concise symbol summaries, not raw source dumps",
             "source docs use signal extraction instead of full-file excerpts",
-            "cap regression-test rows per source file to avoid low-entropy growth",
+            "cap verified r2r workflow rows per source file to avoid low-entropy growth",
             "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
         ],
         "growth_sections": [
@@ -1322,7 +1335,7 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
             "verified workflows and challenges",
             "radare2 source xrefs",
             "source bug-hunt report in R2BUGS.md",
-            "radare2 regression tests from test/db",
+            "verified radare2 workflows discovered from test/db",
             "radare2 source documentation",
             "radare2 plugin source",
             "local radare2 book",
@@ -1646,7 +1659,7 @@ def source_scan_ref(kind: str, name: str) -> str:
 def existing_r2r_source_counts() -> dict[str, int]:
     counts: dict[str, int] = {}
     for row in merge_rows(read_jsonl(KNOWLEDGE_PATH), []):
-        if knowledge_category(row) != "radare2-regression-tests":
+        if knowledge_category(row) != "verified-radare2-workflows":
             continue
         ref = primary_source_ref(row)
         if ref:
@@ -1963,6 +1976,78 @@ def r2r_command_family(commands: list[str]) -> str:
     return safe_id_part(commands[0].split()[0])[:32]
 
 
+def humanize_r2r_name(name: str) -> str:
+    subject = re.sub(r"[`'\"]", "", name.strip())
+    subject = subject.replace("_", " ").replace("/", " ")
+    subject = re.sub(r"\s+", " ", subject).strip()
+    return subject or "this radare2 workflow"
+
+
+def r2r_fixture_context(fixture: str) -> str:
+    if fixture in {"-", "--"}:
+        return "in a scratch radare2 session"
+    if is_r2_uri_fixture(fixture):
+        return f"using `{fixture}`"
+    return f"on `{fixture}`"
+
+
+def r2r_command_topic(commands: list[str]) -> str:
+    topics = []
+    for command in commands:
+        stripped = command.strip()
+        if not stripped or stripped.startswith(("e ", "?e", "? ", "-a", "-b")):
+            continue
+        token = stripped.split()[0]
+        if token not in topics:
+            topics.append(token)
+        if len(topics) >= 3:
+            break
+    if not topics and commands:
+        topics.append(commands[0].strip().split()[0])
+    if not topics:
+        return "radare2 commands"
+    if len(topics) == 1:
+        return f"`{topics[0]}`"
+    if len(topics) == 2:
+        return f"`{topics[0]}` and `{topics[1]}`"
+    return f"`{topics[0]}`, `{topics[1]}`, and `{topics[2]}`"
+
+
+def r2r_workflow_question(name: str, fixture: str, category: str, commands: list[str]) -> str:
+    subject = humanize_r2r_name(name)
+    context = r2r_fixture_context(fixture)
+    command_topic = r2r_command_topic(commands)
+    if category == "esil":
+        return f"How do I use radare2 ESIL to evaluate {subject} {context}?"
+    if category == "anal":
+        return f"How do I use radare2 to analyze {subject} {context}?"
+    if category == "formats":
+        return f"How do I inspect {subject} metadata with radare2 {context}?"
+    if category == "asm":
+        return f"How do I use radare2 assembly or disassembly commands for {subject} {context}?"
+    if category == "io":
+        return f"How do I use radare2 I/O commands to check {subject} {context}?"
+    if category == "cmd":
+        return f"How do I use {command_topic} in radare2 to check {subject} {context}?"
+    return f"How do I use radare2 to check {subject} {context}?"
+
+
+def r2r_workflow_answer(fixture: str, commands: list[str], expected: str, verification: Verification, r2_source: Path) -> str:
+    display_commands = "\n".join(f"- `{cmd}`" for cmd in commands)
+    if fixture in {"-", "--"}:
+        opener = "Start radare2 without a target file and run this command sequence."
+    elif is_r2_uri_fixture(fixture):
+        opener = f"Open `{fixture}` in radare2 and run this command sequence."
+    else:
+        opener = f"Open `{fixture}` in radare2 and run this command sequence."
+    return (
+        f"{opener}\n\n"
+        f"Command sequence:\n{display_commands}\n\n"
+        f"Use these output fragments as the validation signal: {expected}.\n\n"
+        f"Observed output excerpt:\n{output_excerpt(sanitize_text(verification.output, r2_source), 1400)}"
+    )
+
+
 def build_r2r_test_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     source_counts = existing_r2r_source_counts()
@@ -2017,22 +2102,16 @@ def build_r2r_test_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: 
             seen.add(row_id)
             if not verification.ok:
                 continue
-            display_commands = "\n".join(f"- `{cmd}`" for cmd in commands)
             source_refs = [test_ref]
             if fixture.startswith("test/bins/"):
                 source_refs.append(fixture)
             expected = "; ".join(str(check["value"]) for check in checks)
-            answer = (
-                f"Radare2 regression test `{test_ref}` named `{name}` verifies a maintained command workflow on `{fixture}`.\n\n"
-                f"Run this command sequence:\n{display_commands}\n\n"
-                f"Expected signal: {expected}. The agent reran the sequence locally and observed matching output.\n\n"
-                f"Evidence excerpt:\n{output_excerpt(sanitize_text(verification.output, r2_source), 1400)}"
-            )
             family = r2r_command_family(commands)
+            answer = r2r_workflow_answer(fixture, commands, expected, verification, r2_source)
             rows.append(knowledge_row(
                 row_id,
                 f"r2r.{category}.{safe_id_part(path.name)}",
-                f"What radare2 workflow is covered by regression test `{test_ref}` / `{name}`?",
+                r2r_workflow_question(name, fixture, category, commands),
                 answer,
                 source_refs,
                 r2_source,

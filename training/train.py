@@ -6,6 +6,7 @@ This script fine-tunes a configurable Hugging Face model on the Radare2 dataset
 and exports it to GGUF format (Linux/NVIDIA) or MLX format (Mac).
 """
 
+import argparse
 import json
 import os
 import platform
@@ -146,7 +147,7 @@ def setup_model_and_tokenizer(config):
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto" if torch.cuda.is_available() else None,
     )
 
@@ -323,8 +324,19 @@ def export_to_mlx(config, model_path):
     # For now, just print a message
     print("MLX export not implemented yet. Please use Apple's MLX library.")
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Fine-tune a radare2 model from a YAML config.")
+    parser.add_argument(
+        "--config",
+        default=os.environ.get("TRAIN_CONFIG", "config.yaml"),
+        help="Training config path, relative to the training directory by default.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    config = load_config()
+    args = parse_args()
+    config = load_config(args.config)
 
     dataset_path = _resolve_dataset_path(config)
     config['dataset']['path'] = str(dataset_path)

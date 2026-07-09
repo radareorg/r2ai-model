@@ -6,7 +6,8 @@ This directory contains the training pipeline for fine-tuning language models on
 
 ```
 training/
-├── config.yaml          # Configuration file for model, training, and export settings
+├── config.yaml          # Default model, training, and export settings
+├── config.minicpm5.yaml # MiniCPM5 agentic training settings
 ├── train.py            # Main training script
 ├── Makefile            # Automation script for the entire pipeline
 └── README.md           # This file
@@ -14,10 +15,22 @@ training/
 
 ## Quick Start
 
-To run the complete training pipeline:
+To run the classic training pipeline:
 
 ```bash
 make -C training
+```
+
+To train from the merged agentic dataset:
+
+```bash
+make -C training train-agentic CONFIG=config.yaml
+```
+
+To train MiniCPM5 from the merged agentic dataset:
+
+```bash
+make -C training train-minicpm5
 ```
 
 This will:
@@ -38,7 +51,7 @@ This will:
 
 Edit `config.yaml` to customize:
 
-- **Model**: Change `model.name` to any Hugging Face model (default: SmolLM-135M)
+- **Model**: Change `model.name` to any Hugging Face causal LM, or use `config.minicpm5.yaml` for `openbmb/MiniCPM5-1B`
 - **Training**: Adjust epochs, batch size, learning rate, etc.
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
@@ -58,7 +71,15 @@ make -C training deps
 make -C training compile-dataset
 ```
 
-This runs the dataset generation scripts from the parent directory:
+To merge the classic, verified, and agentic datasets instead:
+
+```bash
+make -C training merge-agentic-dataset
+```
+
+`merge-agentic-dataset` writes `../data/training/radare2_all_agentic_train.jsonl`.
+
+`compile-dataset` runs the dataset generation scripts from the parent directory:
 - `parse_usage.py` - Parse radare2 command documentation
 - `generate-dataset.py` - Generate Q&A pairs using LLMs
 - `enrich-dataset.py` - Expand the dataset with variations
@@ -68,17 +89,22 @@ This runs the dataset generation scripts from the parent directory:
 ### 3. Train Model
 ```bash
 make -C training train
+# or, for the merged agentic dataset
+make -C training train-agentic CONFIG=config.yaml
+# or MiniCPM5
+make -C training train-minicpm5
 ```
 
 ### 4. Individual Targets
 ```bash
-make -C training help  # Show all available targets
-make -C training clean # Clean up environment and outputs
+make -C training help                 # Show all available targets
+make -C training merge-agentic-dataset # Build merged training JSONL
+make -C training clean                # Clean up environment and outputs
 ```
 
 ## Dataset
 
-The training uses the Radare2 dataset located at `../data/radare2/radare2_train.jsonl`. This dataset contains:
+The classic training target uses `../data/radare2/radare2_train.jsonl`. The agentic targets use `../data/training/radare2_all_agentic_train.jsonl`. This dataset contains:
 - Questions about radare2 usage
 - Corresponding radare2 commands as answers
 - Conversational format with system prompts

@@ -13,20 +13,16 @@ make agentic-verify
 make agentic-pending
 
 # merge all training-ready datasets
-mkdir -p data/training
-cat \
-  data/radare2/radare2_train.jsonl \
-  data/radare2-agentic/verified.jsonl \
-  data/r2js/verified.jsonl \
-  data/reasoning-long/verified.jsonl \
-  data/agentic-knowledge/knowledge.jsonl \
-  > data/training/radare2_all_agentic_train.jsonl
+make -C training merge-agentic-dataset
 
-# train with training/config.yaml
-make -C training train
+# train with training/config.yaml against the merged agentic dataset
+make -C training train-agentic CONFIG=config.yaml
+
+# train MiniCPM5 against the merged agentic dataset
+make -C training train-minicpm5
 ```
 
-Before training, set `training/config.yaml`:
+Before custom training, set the config:
 
 ```yaml
 dataset:

@@ -5,7 +5,18 @@ and the agentic knowledge aggregate:
 
 ```sh
 make agentic-verify
+make -C training merge-agentic-dataset
+```
 
+The merge target writes:
+
+```text
+data/training/radare2_all_agentic_train.jsonl
+```
+
+Equivalent manual merge:
+
+```sh
 mkdir -p data/training
 cat \
   data/radare2/radare2_train.jsonl \
@@ -16,30 +27,29 @@ cat \
   > data/training/radare2_all_agentic_train.jsonl
 ```
 
-Point `training/config.yaml` at the merged dataset:
-
-```yaml
-dataset:
-  path: "../data/training/radare2_all_agentic_train.jsonl"
-```
-
-Choose the model in the same file:
+Choose the model in a training config:
 
 ```yaml
 model:
   name: "Qwen/Qwen2.5-3B-Instruct"
   tokenizer: null
+
+dataset:
+  path: "../data/training/radare2_all_agentic_train.jsonl"
 ```
 
-Use a small model for pipeline testing and a larger model for real training:
+Useful model choices:
 
 ```yaml
 # smoke test
 name: "HuggingFaceTB/SmolLM-135M"
 
-# local training
+# small local instruct models
 name: "Qwen/Qwen2.5-1.5B-Instruct"
 name: "Qwen/Qwen2.5-3B-Instruct"
+
+# small fast tool-calling model
+name: "openbmb/MiniCPM5-1B"
 
 # current heavier default
 name: "jan-hq/Qwen3-4B-no-think"
@@ -52,14 +62,14 @@ lora:
   use_lora: true
 ```
 
-Run training:
+Train with the selected config:
 
 ```sh
-make -C training train
+make -C training train-agentic CONFIG=config.yaml
 ```
 
-Run the full setup, dependency install, dataset compilation, and training target:
+Train MiniCPM5 with the included config:
 
 ```sh
-make -C training
+make -C training train-minicpm5
 ```

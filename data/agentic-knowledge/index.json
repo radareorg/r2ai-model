@@ -5,9 +5,9 @@
     "r2-command-help": 29,
     "r2js": 14,
     "radare2-plugin-source": 64,
-    "radare2-regression-tests": 96,
     "radare2-source-docs": 57,
     "radare2-source-xrefs": 6,
+    "verified-radare2-workflows": 108,
     "verified-workflows": 8
   },
   "category_limits": {
@@ -16,9 +16,9 @@
     "r2-command-help": 80,
     "r2js": 80,
     "radare2-plugin-source": 64,
-    "radare2-regression-tests": 240,
     "radare2-source-docs": 80,
     "radare2-source-xrefs": 160,
+    "verified-radare2-workflows": 240,
     "verified-workflows": 80
   },
   "discover_fixtures": false,
@@ -29,16 +29,16 @@
     "verified workflows and challenges",
     "radare2 source xrefs",
     "source bug-hunt report in R2BUGS.md",
-    "radare2 regression tests from test/db",
+    "verified radare2 workflows discovered from test/db",
     "radare2 source documentation",
     "radare2 plugin source",
     "local radare2 book",
     "online radare2/book resources",
     "r2js scripts"
   ],
-  "knowledge_rows": 279,
+  "knowledge_rows": 291,
   "last_new_by_category": {
-    "radare2-regression-tests": 4
+    "verified-radare2-workflows": 4
   },
   "last_new_rows": 4,
   "last_pending_rows": 0,
@@ -50,7 +50,7 @@
     "reject navigation-heavy online pages",
     "keep plugin rows as concise symbol summaries, not raw source dumps",
     "source docs use signal extraction instead of full-file excerpts",
-    "cap regression-test rows per source file to avoid low-entropy growth",
+    "cap verified r2r workflow rows per source file to avoid low-entropy growth",
     "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
   ],
   "section_budget": 4
