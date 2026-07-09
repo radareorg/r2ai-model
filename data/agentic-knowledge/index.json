@@ -1,8 +1,46 @@
 {
+  "aggregate_by_category": {
+    "human-reviewed": 2,
+    "online-radare2-docs": 3,
+    "r2-command-help": 29,
+    "r2js": 14,
+    "radare2-plugin-source": 64,
+    "radare2-source-docs": 57,
+    "verified-workflows": 8
+  },
+  "category_limits": {
+    "human-reviewed": 1000,
+    "online-radare2-docs": 12,
+    "r2-command-help": 80,
+    "r2js": 80,
+    "radare2-plugin-source": 64,
+    "radare2-source-docs": 80,
+    "verified-workflows": 80
+  },
+  "discover_fixtures": false,
   "growth_budget": 24,
-  "knowledge_rows": 115,
-  "last_new_rows": 24,
-  "last_pending_rows": 2,
+  "growth_sections": [
+    "human-reviewed pending answers",
+    "radare2 command help",
+    "verified workflows and challenges",
+    "radare2 source documentation",
+    "radare2 plugin source",
+    "local radare2 book",
+    "online radare2/book resources",
+    "r2js scripts"
+  ],
+  "knowledge_rows": 177,
+  "last_new_by_category": {},
+  "last_new_rows": 0,
+  "last_pending_rows": 0,
   "online_mode": "auto",
-  "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized"
+  "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
+  "quality_policy": [
+    "dedupe by id and content_fingerprint",
+    "prune generic fixture.triage rows unless explicitly retained elsewhere",
+    "reject navigation-heavy online pages",
+    "keep plugin rows as concise symbol summaries, not raw source dumps",
+    "source docs use signal extraction instead of full-file excerpts"
+  ],
+  "section_budget": 4
 }

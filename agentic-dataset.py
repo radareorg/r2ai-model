@@ -703,10 +703,38 @@ def compact_text(text: str, r2_source: Path, limit: int = 1800) -> str:
     return output_excerpt(text, limit)
 
 
+def extract_doc_signal(text: str, r2_source: Path, limit: int = 1400) -> str:
+    text = sanitize_text(text, r2_source)
+    wanted = re.compile(
+        r"(`[^`]+`|\br2\b|radare2|command|plugin|analysis|debug|decompil|forensic|firmware|"
+        r"xref|strings?|sections?|imports?|exports?|filesystem|r2js|script|workflow|use |run )",
+        re.IGNORECASE,
+    )
+    lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.match(r"^\d+(\.\d+){0,4}\.?\s+", stripped):
+            continue
+        if len(stripped) > 220:
+            stripped = stripped[:220].rstrip() + "..."
+        if stripped.startswith("#") or wanted.search(stripped):
+            lines.append(stripped)
+        if len("\n".join(lines)) >= limit:
+            break
+    if not lines:
+        lines = [line.strip() for line in text.splitlines() if line.strip()[:1] != "#"][:8]
+    return compact_text("\n".join(lines), r2_source, limit)
+
+
 def html_to_text(text: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?</\1>", "\n", text)
+    main = re.search(r"(?is)<main[^>]*>(.*?)</main>", text) or re.search(r"(?is)<article[^>]*>(.*?)</article>", text)
+    if main:
+        text = main.group(1)
+    text = re.sub(r"(?is)<(script|style|nav|header|footer|aside).*?</\1>", "\n", text)
     text = re.sub(r"(?i)<br\s*/?>", "\n", text)
-    text = re.sub(r"(?i)</(p|div|section|article|h[1-6]|li|tr)>", "\n", text)
+    text = re.sub(r"(?i)</(p|div|section|article|h[1-6]|li|tr|pre|code)>", "\n", text)
     text = re.sub(r"<[^>]+>", " ", text)
     return html.unescape(text)
 
@@ -742,17 +770,198 @@ def knowledge_row(
     return row
 
 
+def human_answer_row_id(pending_id: str) -> str:
+    return "knowledge.human." + safe_id_part(pending_id)
+
+
+def human_responses_by_pending_id() -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    for response in read_jsonl(HUMAN_RESPONSES_PATH):
+        pending_id = str(response.get("id", ""))
+        if not pending_id:
+            continue
+        action = str(response.get("action", ""))
+        if action in {"answered", "dropped"}:
+            latest[pending_id] = response
+    return latest
+
+
+def human_suppressed_pending_ids() -> set[str]:
+    return set(human_responses_by_pending_id())
+
+
+def human_response_knowledge_rows(r2_source: Path, responses: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    if responses is None:
+        response_map = human_responses_by_pending_id()
+        responses = list(response_map.values())
+    rows: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for response in responses:
+        pending_id = str(response.get("id", ""))
+        answer = str(response.get("human_answer", "")).strip()
+        if not pending_id or response.get("action") != "answered" or not answer:
+            continue
+        row_id = human_answer_row_id(pending_id)
+        if row_id in seen_ids:
+            continue
+        original = response.get("original", {}) if isinstance(response.get("original"), dict) else {}
+        refs = []
+        for ref in original.get("source_refs", []):
+            refs.append(str(ref))
+        if response.get("source_pending"):
+            refs.append(str(response["source_pending"]))
+        question = str(response.get("question") or original.get("question") or pending_id)
+        rows.append(knowledge_row(
+            row_id,
+            "human.pending_answer",
+            question,
+            "Human-reviewed answer for a previously pending agentic task:\n" + answer,
+            refs,
+            r2_source,
+            tags=["human-review", str(response.get("kind") or original.get("kind") or "pending")],
+            title="Human answer for " + pending_id,
+        ))
+        seen_ids.add(row_id)
+    return rows
+
+
 def existing_knowledge_ids() -> set[str]:
     ids = {str(row.get("id")) for row in read_jsonl(KNOWLEDGE_PATH) if row.get("id")}
     if KNOWLEDGE_RUNS_DIR.is_dir():
         for path in KNOWLEDGE_RUNS_DIR.glob("*.jsonl"):
             ids.update(str(row.get("id")) for row in read_jsonl(path) if row.get("id"))
+    ids.update(human_suppressed_pending_ids())
     return ids
 
 
+def assistant_text(row: dict[str, Any]) -> str:
+    for message in row.get("messages", []):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            return str(message.get("content", ""))
+    return ""
+
+
+def set_assistant_text(row: dict[str, Any], content: str) -> None:
+    for message in row.get("messages", []):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            message["content"] = content
+            return
+
+
+def normalized_knowledge_text(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r"0x[0-9a-f]+", "0x", text)
+    text = re.sub(r"\b\d+\b", "#", text)
+    text = re.sub(r"[`'\"\\]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def navigation_line_count(text: str) -> int:
+    return sum(1 for line in text.splitlines() if re.match(r"^\s*\d+(\.\d+){0,4}\.?\s+\S", line))
+
+
+def code_line_density(text: str) -> float:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if not lines:
+        return 0.0
+    code_lines = 0
+    for line in lines:
+        if line.startswith(("#include", "typedef", "static ", "return ", "if (", "for (", "while (", "case ", "R_")):
+            code_lines += 1
+        elif line.endswith((";", "{", "}")) or "->" in line:
+            code_lines += 1
+    return code_lines / len(lines)
+
+
+def compact_plugin_answer(answer: str) -> str:
+    first = answer.split("Relevant source excerpt:", 1)[0].strip()
+    if first:
+        return first + " This row records plugin identity only; detailed behavior should be learned from focused command evidence or concise source documentation."
+    return answer
+
+
+def knowledge_fingerprint(row: dict[str, Any]) -> str:
+    topic = str(row.get("topic", ""))
+    kind = str(row.get("kind", ""))
+    refs = row.get("source_refs", [])
+    ref_hint = ""
+    if isinstance(refs, list) and refs:
+        ref_hint = str(refs[0])
+    text = normalized_knowledge_text(assistant_text(row))[:1600]
+    if topic == "plugin.source":
+        return stable_hash(topic, text)
+    if topic == "fixture.triage":
+        return stable_hash(topic)
+    if topic.startswith("online."):
+        return stable_hash(topic, text[:900])
+    return stable_hash(kind, topic, ref_hint, text)
+
+
+def cleanup_knowledge_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    row = copy.deepcopy(row)
+    topic = str(row.get("topic", ""))
+    answer = assistant_text(row)
+    if not str(row.get("id", "")):
+        return None
+    if topic == "fixture.triage":
+        return None
+    if topic.startswith("online.") and navigation_line_count(answer) > 24:
+        return None
+    if topic == "plugin.source" and "Relevant source excerpt:" in answer:
+        answer = compact_plugin_answer(answer)
+        set_assistant_text(row, answer)
+    if topic == "plugin.source" and code_line_density(answer) > 0.25:
+        return None
+    if len(normalized_knowledge_text(answer)) < 50 and not topic.startswith("human."):
+        return None
+    row["content_fingerprint"] = knowledge_fingerprint(row)
+    return row
+
+
+def knowledge_category_limits() -> dict[str, int]:
+    return {
+        "human-reviewed": int(os.environ.get("AGENTIC_MAX_HUMAN_ROWS", "1000")),
+        "online-radare2-docs": int(os.environ.get("AGENTIC_MAX_ONLINE_ROWS", "12")),
+        "r2-command-help": int(os.environ.get("AGENTIC_MAX_HELP_ROWS", "80")),
+        "r2js": int(os.environ.get("AGENTIC_MAX_R2JS_ROWS", "80")),
+        "radare2-plugin-source": int(os.environ.get("AGENTIC_MAX_PLUGIN_SOURCE_ROWS", "64")),
+        "radare2-source-docs": int(os.environ.get("AGENTIC_MAX_SOURCE_DOC_ROWS", "80")),
+        "verified-workflows": int(os.environ.get("AGENTIC_MAX_WORKFLOW_ROWS", "80")),
+    }
+
+
+def dedupe_knowledge_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_fingerprints: set[str] = set()
+    category_counts: dict[str, int] = {}
+    category_limits = knowledge_category_limits()
+    for row in rows:
+        cleaned = cleanup_knowledge_row(row)
+        if not cleaned:
+            continue
+        category = knowledge_category(cleaned)
+        if category_counts.get(category, 0) >= category_limits.get(category, 1_000_000):
+            continue
+        row_id = str(cleaned.get("id", ""))
+        fingerprint = str(cleaned.get("content_fingerprint", ""))
+        if row_id in seen_ids or fingerprint in seen_fingerprints:
+            continue
+        deduped.append(cleaned)
+        seen_ids.add(row_id)
+        seen_fingerprints.add(fingerprint)
+        category_counts[category] = category_counts.get(category, 0) + 1
+    return deduped
+
+
 def merge_rows(existing: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return dedupe_knowledge_rows(existing + new_rows)
+
+
+def merge_pending_rows(existing: list[dict[str, Any]], new_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged = list(existing)
-    seen = {str(row.get("id")) for row in merged if row.get("id")}
+    seen = {str(row.get("id", "")) for row in merged if row.get("id")}
     for row in new_rows:
         row_id = str(row.get("id", ""))
         if row_id and row_id not in seen:
@@ -773,27 +982,143 @@ def next_run_path() -> Path:
     raise RuntimeError("cannot allocate agentic knowledge run path")
 
 
-def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]], args: argparse.Namespace) -> tuple[int, int]:
-    existing = read_jsonl(KNOWLEDGE_PATH)
-    aggregate = merge_rows(existing, new_rows)
-    if new_rows:
-        run_path = next_run_path()
-        write_jsonl(run_path, new_rows)
-    write_jsonl_if_changed(KNOWLEDGE_PATH, aggregate)
+def knowledge_category(row: dict[str, Any]) -> str:
+    topic = str(row.get("topic") or row.get("kind") or "uncategorized")
+    if topic.startswith("cmd."):
+        return "r2-command-help"
+    if topic.startswith("source."):
+        return "radare2-source-docs"
+    if topic.startswith("plugin."):
+        return "radare2-plugin-source"
+    if topic.startswith("online."):
+        return "online-radare2-docs"
+    if topic.startswith("human."):
+        return "human-reviewed"
+    if row.get("kind") == "agentic_experiment":
+        return "verified-workflows"
+    return topic.split(".", 1)[0]
+
+
+def count_by_category(rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in rows:
+        category = knowledge_category(row)
+        counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def print_new_knowledge_rows(rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]]) -> None:
+    if rows:
+        print("knowledge new rows:")
+        for row in rows:
+            refs = row.get("source_refs", [])
+            ref = ""
+            if isinstance(refs, list) and refs:
+                ref = f" [{refs[0]}]"
+            print(f"  + {knowledge_category(row)} {row.get('id', '<missing-id>')}: {row.get('topic', row.get('kind', ''))}{ref}")
+        counts = ", ".join(f"{name}={count}" for name, count in count_by_category(rows).items())
+        print(f"knowledge new categories: {counts}")
+    else:
+        print("knowledge new rows: none")
     if pending_rows:
-        pending = merge_rows(read_jsonl(KNOWLEDGE_PENDING_PATH), pending_rows)
-        write_jsonl_if_changed(KNOWLEDGE_PENDING_PATH, pending)
+        print("knowledge pending rows:")
+        for row in pending_rows:
+            print(f"  ? {row.get('kind', 'pending')} {row.get('id', '<missing-id>')}: {row.get('reason', '')}")
+
+
+def promote_knowledge_rows(rows: list[dict[str, Any]]) -> int:
+    clean_run_shards()
+    existing = merge_rows(read_jsonl(KNOWLEDGE_PATH), [])
+    existing_ids = {str(row.get("id")) for row in existing if row.get("id")}
+    existing_fingerprints = {str(row.get("content_fingerprint")) for row in existing if row.get("content_fingerprint")}
+    aggregate = merge_rows(existing, dedupe_knowledge_rows(rows))
+    new_rows = []
+    for row in aggregate:
+        row_id = str(row.get("id", ""))
+        fingerprint = str(row.get("content_fingerprint", ""))
+        if row_id not in existing_ids and fingerprint not in existing_fingerprints:
+            new_rows.append(row)
+    if not new_rows:
+        return 0
+    write_jsonl(next_run_path(), new_rows)
+    write_jsonl_if_changed(KNOWLEDGE_PATH, aggregate)
+    clean_run_shards(aggregate)
+    return len(new_rows)
+
+
+def clean_run_shards(allowed_rows: list[dict[str, Any]] | None = None) -> None:
+    if not KNOWLEDGE_RUNS_DIR.is_dir():
+        return
+    allowed_ids: set[str] | None = None
+    allowed_fingerprints: set[str] | None = None
+    if allowed_rows is not None:
+        allowed_ids = {str(row.get("id")) for row in allowed_rows if row.get("id")}
+        allowed_fingerprints = {str(row.get("content_fingerprint")) for row in allowed_rows if row.get("content_fingerprint")}
+    for path in sorted(KNOWLEDGE_RUNS_DIR.glob("*.jsonl")):
+        rows = dedupe_knowledge_rows(read_jsonl(path))
+        if allowed_ids is not None and allowed_fingerprints is not None:
+            rows = [
+                row for row in rows
+                if str(row.get("id", "")) in allowed_ids or str(row.get("content_fingerprint", "")) in allowed_fingerprints
+            ]
+        write_jsonl_if_changed(path, rows)
+
+
+def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[dict[str, Any]], args: argparse.Namespace) -> tuple[int, int, list[dict[str, Any]]]:
+    clean_run_shards()
+    existing = merge_rows(read_jsonl(KNOWLEDGE_PATH), [])
+    existing_ids = {str(row.get("id")) for row in existing if row.get("id")}
+    existing_fingerprints = {str(row.get("content_fingerprint")) for row in existing if row.get("content_fingerprint")}
+    aggregate = merge_rows(existing, dedupe_knowledge_rows(new_rows))
+    accepted_new = []
+    for row in aggregate:
+        row_id = str(row.get("id", ""))
+        fingerprint = str(row.get("content_fingerprint", ""))
+        if row_id not in existing_ids and fingerprint not in existing_fingerprints:
+            accepted_new.append(row)
+    if accepted_new:
+        run_path = next_run_path()
+        write_jsonl(run_path, accepted_new)
+    write_jsonl_if_changed(KNOWLEDGE_PATH, aggregate)
+    clean_run_shards(aggregate)
+    pending = merge_pending_rows(
+        filter_suppressed_pending_rows(read_jsonl(KNOWLEDGE_PENDING_PATH)),
+        filter_suppressed_pending_rows(pending_rows),
+    )
+    write_jsonl_if_changed(KNOWLEDGE_PENDING_PATH, pending)
     index = {
         "knowledge_rows": len(aggregate),
-        "last_new_rows": len(new_rows),
+        "last_new_rows": len(accepted_new),
+        "last_new_by_category": count_by_category(accepted_new),
+        "aggregate_by_category": count_by_category(aggregate),
         "last_pending_rows": len(pending_rows),
         "online_mode": args.online,
         "growth_budget": args.growth_budget,
+        "section_budget": args.section_budget,
+        "discover_fixtures": args.discover_fixtures,
+        "category_limits": knowledge_category_limits(),
+        "quality_policy": [
+            "dedupe by id and content_fingerprint",
+            "prune generic fixture.triage rows unless explicitly retained elsewhere",
+            "reject navigation-heavy online pages",
+            "keep plugin rows as concise symbol summaries, not raw source dumps",
+            "source docs use signal extraction instead of full-file excerpts"
+        ],
+        "growth_sections": [
+            "human-reviewed pending answers",
+            "radare2 command help",
+            "verified workflows and challenges",
+            "radare2 source documentation",
+            "radare2 plugin source",
+            "local radare2 book",
+            "online radare2/book resources",
+            "r2js scripts",
+        ],
         "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
     }
     KNOWLEDGE_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
     KNOWLEDGE_INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    return len(new_rows), len(aggregate)
+    return len(accepted_new), len(aggregate), accepted_new
 
 
 def verification_summary(verification: Verification, r2_source: Path, r2_bin: Path) -> dict[str, Any]:
@@ -895,7 +1220,7 @@ def build_doc_knowledge(paths: list[Path], base: Path, source_prefix: str, r2_so
         if row_id in seen:
             continue
         title = extract_markdown_title(raw, ref)
-        excerpt = compact_text(raw, r2_source, 1800)
+        excerpt = extract_doc_signal(raw, r2_source, 1400)
         question = f"What workflow or usage knowledge is documented in `{source_ref}`?"
         answer = f"Document `{source_ref}` ({title}) provides this source-grounded guidance:\n{excerpt}"
         rows.append(knowledge_row(
@@ -930,8 +1255,10 @@ def build_plugin_source_knowledge(r2_source: Path, seen: set[str], limit: int) -
         if row_id in seen:
             continue
         plugin_list = ", ".join(f"{kind}:{name}" for kind, name in sorted(set(plugins))[:8])
-        excerpt = compact_text(text[:5000], r2_source, 1600)
-        answer = f"Source `{ref}` defines radare2 plugin symbols: {plugin_list}. Relevant source excerpt:\n{excerpt}"
+        answer = (
+            f"Source `{ref}` defines radare2 plugin symbols: {plugin_list}. "
+            "This records the plugin family and symbol names only; behavior should be learned from focused command evidence or concise docs."
+        )
         rows.append(knowledge_row(
             row_id,
             "plugin.source",
@@ -989,11 +1316,12 @@ def discover_fixture_triage_plans(r2_source: Path, seen: set[str], limit: int) -
     return plans
 
 
-def build_experiment_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def build_experiment_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int, discover_fixtures: bool) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
     plans = list(GROWTH_EXPERIMENT_PLANS)
-    plans.extend(discover_fixture_triage_plans(r2_source, seen, max(limit * 4, 8)))
+    if discover_fixtures:
+        plans.extend(discover_fixture_triage_plans(r2_source, seen, max(limit * 4, 8)))
     for plan in plans:
         if len(rows) >= limit:
             break
@@ -1058,7 +1386,7 @@ def build_online_knowledge(args: argparse.Namespace, r2_source: Path, seen: set[
             text = raw.decode("utf-8", errors="replace")
             if "html" in ctype or "<html" in text[:500].lower():
                 text = html_to_text(text)
-            text = compact_text(text, r2_source, 1800)
+            text = extract_doc_signal(text, r2_source, 1400)
             if len(text.strip()) < 80:
                 continue
             row_id = f"knowledge.online.{stable_hash(url, text[:1200])}"
@@ -1088,6 +1416,13 @@ def build_online_knowledge(args: argparse.Namespace, r2_source: Path, seen: set[
     return rows, pending
 
 
+def filter_suppressed_pending_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    suppressed = human_suppressed_pending_ids()
+    if not suppressed:
+        return rows
+    return [row for row in rows if str(row.get("id", "")) not in suppressed]
+
+
 def growth_pending(row_id: str, kind: str, question: str, verification: Verification, r2_source: Path, source_refs: list[str]) -> dict[str, Any]:
     return {
         "id": row_id,
@@ -1113,41 +1448,36 @@ def build_autonomous_knowledge(r2_bin: Path, r2_source: Path, timeout: int, args
     rows: list[dict[str, Any]] = []
     pending: list[dict[str, Any]] = []
 
-    baseline = build_help_knowledge(r2_bin, r2_source, timeout) + build_r2js_script_knowledge(r2_source)
+    baseline = human_response_knowledge_rows(r2_source) + build_help_knowledge(r2_bin, r2_source, timeout) + build_r2js_script_knowledge(r2_source)
     for row in baseline:
         row_id = str(row.get("id", ""))
         if row_id and row_id not in seen and len(rows) < budget:
             rows.append(row)
             seen.add(row_id)
 
+    section_budget = max(1, args.section_budget)
     builders = [
-        lambda n: build_help_frontier(r2_bin, r2_source, timeout, seen, n),
-        lambda n: build_experiment_knowledge(r2_bin, r2_source, timeout, seen, n),
-        lambda n: (build_doc_knowledge(iter_source_docs(r2_source), r2_source, "source", r2_source, seen, n), []),
-        lambda n: (build_plugin_source_knowledge(r2_source, seen, n), []),
-        lambda n: (build_doc_knowledge(iter_local_book_docs(r2_source), Path(os.environ.get("R2_BOOK_SOURCE", str(r2_source.parent / "radare2-book"))), "book", r2_source, seen, n), []),
-        lambda n: build_online_knowledge(args, r2_source, seen, n),
+        ("help", lambda n: build_help_frontier(r2_bin, r2_source, timeout, seen, n)),
+        ("experiments", lambda n: build_experiment_knowledge(r2_bin, r2_source, timeout, seen, n, args.discover_fixtures)),
+        ("source-docs", lambda n: (build_doc_knowledge(iter_source_docs(r2_source), r2_source, "source", r2_source, seen, n), [])),
+        ("plugin-source", lambda n: (build_plugin_source_knowledge(r2_source, seen, n), [])),
+        ("book-docs", lambda n: (build_doc_knowledge(iter_local_book_docs(r2_source), Path(os.environ.get("R2_BOOK_SOURCE", str(r2_source.parent / "radare2-book"))), "book", r2_source, seen, n), [])),
+        ("online", lambda n: build_online_knowledge(args, r2_source, seen, n)),
     ]
-    while len(rows) < budget:
-        made_progress = False
-        per_builder = max(1, (budget - len(rows) + len(builders) - 1) // len(builders))
-        for builder in builders:
-            remaining = budget - len(rows)
-            if remaining <= 0:
-                break
-            new_rows, new_pending = builder(min(per_builder, remaining))
-            pending.extend(new_pending)
-            before = len(rows)
-            add_limited(rows, new_rows, budget)
-            made_progress = made_progress or len(rows) > before
-        if not made_progress:
+    for _name, builder in builders:
+        remaining = budget - len(rows)
+        if remaining <= 0:
             break
+        new_rows, new_pending = builder(min(section_budget, remaining))
+        pending.extend(new_pending)
+        add_limited(rows, new_rows, budget)
     return rows, pending
 
 
 def write_knowledge_base(r2_bin: Path, r2_source: Path, timeout: int, args: argparse.Namespace) -> tuple[int, int, int]:
     rows, pending = build_autonomous_knowledge(r2_bin, r2_source, timeout, args)
-    new_count, total_count = write_knowledge_outputs(rows, pending, args)
+    new_count, total_count, accepted_rows = write_knowledge_outputs(rows, pending, args)
+    print_new_knowledge_rows(accepted_rows, pending)
     return new_count, total_count, len(pending)
 
 
@@ -1216,7 +1546,7 @@ def load_agentic_pending() -> tuple[dict[Path, list[dict[str, Any]]], list[tuple
     loaded: dict[Path, list[dict[str, Any]]] = {}
     tasks: list[tuple[Path, dict[str, Any]]] = []
     for path in agentic_pending_paths():
-        rows = read_jsonl(path)
+        rows = filter_suppressed_pending_rows(read_jsonl(path))
         loaded[path] = rows
         for row in rows:
             tasks.append((path, row))
@@ -1352,14 +1682,18 @@ def pending(args: argparse.Namespace) -> int:
 
     for path, rows in loaded.items():
         write_jsonl_if_changed(path, rows)
+    promoted = 0
     if responses:
         previous = read_jsonl(response_path)
         write_jsonl_if_changed(response_path, previous + responses)
+        promoted = promote_knowledge_rows(human_response_knowledge_rows(r2_source, responses))
 
     remaining = sum(len(rows) for rows in loaded.values())
     print(f"agentic pending: {answered} answered, {dropped} dropped, {skipped} skipped, {remaining} remaining")
     if responses:
         print(f"wrote responses to {repo_path_ref(response_path)}")
+    if promoted:
+        print(f"promoted {promoted} human-reviewed rows into {repo_path_ref(KNOWLEDGE_PATH)}")
     return 0
 
 
@@ -1430,8 +1764,10 @@ def main(argv: list[str]) -> int:
     build_parser.add_argument("--r2-source", default=str(DEFAULT_R2_SOURCE))
     build_parser.add_argument("--timeout", type=int, default=20)
     build_parser.add_argument("--growth-budget", type=int, default=int(os.environ.get("AGENTIC_GROWTH_BUDGET", "24")))
+    build_parser.add_argument("--section-budget", type=int, default=int(os.environ.get("AGENTIC_SECTION_BUDGET", "4")))
     build_parser.add_argument("--online", choices=["auto", "off", "required"], default=os.environ.get("AGENTIC_ONLINE", "auto"))
     build_parser.add_argument("--online-timeout", type=float, default=float(os.environ.get("AGENTIC_ONLINE_TIMEOUT", "2.0")))
+    build_parser.add_argument("--discover-fixtures", action="store_true", default=os.environ.get("AGENTIC_DISCOVER_FIXTURES", "0").lower() in {"1", "true", "yes", "on"})
     build_parser.add_argument("--dry-run", action="store_true")
     build_parser.set_defaults(func=build)
 
