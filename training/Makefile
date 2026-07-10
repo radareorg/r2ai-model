@@ -48,16 +48,21 @@ compile-dataset:
 	cd .. && $(VPYTHON) r2cmd.py
 	@echo "Dataset compilation completed."
 
-# Merge all training-ready datasets, including agentic knowledge.
+# Merge all training-ready datasets, including agentic knowledge, command knowledge, and human memories.
 merge-agentic-dataset:
-	@echo "Merging classic, verified, and agentic datasets into $(MERGED_DATASET)..."
+	@echo "Merging classic, verified, agentic, command, and memory datasets into $(MERGED_DATASET)..."
 	mkdir -p ../data/training
+	mkdir -p ../data/agentic-commands
+	touch ../data/agentic-commands/verified.jsonl
+	cd .. && ./memory.py export-training
 	cat \
 		../data/radare2/radare2_train.jsonl \
 		../data/radare2-agentic/verified.jsonl \
 		../data/r2js/verified.jsonl \
 		../data/reasoning-long/verified.jsonl \
 		../data/agentic-knowledge/knowledge.jsonl \
+		../data/agentic-commands/verified.jsonl \
+		../data/memory/verified.jsonl \
 		> $(MERGED_DATASET)
 	@echo "Merged dataset written to $(MERGED_DATASET)."
 
@@ -109,7 +114,7 @@ help:
 	@echo "  venv                   - Create Python virtual environment"
 	@echo "  deps                   - Install Python dependencies"
 	@echo "  compile-dataset        - Compile the classic dataset from source scripts"
-	@echo "  merge-agentic-dataset  - Merge classic, verified, and agentic JSONL datasets"
+	@echo "  merge-agentic-dataset  - Merge classic, verified, agentic, command, and memory JSONL datasets"
 	@echo "  train                  - Train with CONFIG (default: config.yaml) after classic dataset compilation"
 	@echo "  train-agentic          - Merge all agentic datasets and train with CONFIG"
 	@echo "  train-minicpm5         - Train openbmb/MiniCPM5-1B with config.minicpm5.yaml"

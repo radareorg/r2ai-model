@@ -38,6 +38,14 @@ KNOWLEDGE_PATH = KNOWLEDGE_DIR / "knowledge.jsonl"
 KNOWLEDGE_RUNS_DIR = KNOWLEDGE_DIR / "runs"
 KNOWLEDGE_PENDING_PATH = KNOWLEDGE_DIR / "pending-human.jsonl"
 KNOWLEDGE_INDEX_PATH = KNOWLEDGE_DIR / "index.json"
+COMMANDS_DIR = ROOT / "data" / "agentic-commands"
+COMMANDS_DB_PATH = COMMANDS_DIR / "commands.jsonl"
+COMMANDS_TRAINING_PATH = COMMANDS_DIR / "verified.jsonl"
+COMMANDS_INDEX_PATH = COMMANDS_DIR / "index.json"
+COMMANDS_MEMORY_TOPICS_PATH = COMMANDS_DIR / "memory-topics.jsonl"
+COMMANDS_KNOWLEDGE_TOPICS_PATH = COMMANDS_DIR / "knowledge-memory-topics.jsonl"
+MEMORY_TOPICS_PATH = ROOT / "data" / "memory" / "topics.jsonl"
+MEMORY_PATH = ROOT / "data" / "memory" / "memory.jsonl"
 HUMAN_RESPONSES_PATH = ROOT / "data" / "agentic-review" / "human-responses.jsonl"
 R2BUGS_PATH = ROOT / "R2BUGS.md"
 R2BUGS_START = "<!-- agentic-r2bugs:start -->"
@@ -618,6 +626,40 @@ GROWTH_DOC_GLOBS = [
 
 GROWTH_EXPERIMENT_PLANS = [
     {
+        "id": "workflow.esil.repeat_prefix.3aes",
+        "topic": "command-composition.esil-repeat",
+        "fixture": "malloc://16",
+        "commands": [
+            "e asm.arch=x86",
+            "e asm.bits=32",
+            "wx 404040",
+            "pd 3",
+            "aei",
+            "aeim",
+            "aer eax=0",
+            "aer eip=0",
+            "3aes",
+            "aer eax",
+            "aer eip",
+        ],
+        "checks": [{"type": "contains", "value": "inc eax"}, {"type": "contains", "value": "0x00000003"}],
+        "question": "Why does `3aes` step three ESIL instructions in radare2?",
+        "answer": "Radare2 command lines accept a numeric repeat prefix. `3aes` means run `aes` three times. The `aes` command is read as `a` for the analysis command family, `e` for ESIL, and `s` for ESIL step. This is equivalent to typing `aes; aes; aes`, and the verified example uses three `inc eax` bytes so both `eax` and `eip` end at `0x00000003` after `3aes`.",
+        "source_refs": ["r2:?*", "libr/core/cmd_anal.inc.c"],
+        "tags": ["workflow", "command-composition", "repeat-prefix", "esil", "aes"],
+    },
+    {
+        "id": "workflow.oneliner.seek_grep.output",
+        "topic": "command-composition.oneliner",
+        "fixture": "test/bins/elf/hello_world",
+        "commands": ["aaa", "afl~main", "pd 5 @ main", "p8 4 @ entry0", "izz~Hello"],
+        "checks": [{"type": "contains", "value": "main"}, {"type": "contains", "value": "Hello"}],
+        "question": "How do I build a radare2 oneliner with analysis, grep, and temporary seek syntax?",
+        "answer": "Compose radare2 commands left to right: run an analysis command such as `aaa`, filter command output with `~`, and add `@ addr` to run a command at a temporary seek without changing the workflow intent. For example, `afl~main` filters functions to main-like rows, `pd 5 @ main` disassembles five instructions at `main`, and `izz~Hello` filters all strings for `Hello`.",
+        "source_refs": ["r2:?*", "libr/core/cmd.c", "libr/core/cmd_anal.inc.c"],
+        "tags": ["workflow", "command-composition", "oneliner", "grep", "temporary-seek"],
+    },
+    {
         "id": "workflow.elf.pdc.main",
         "topic": "decompilation.pdc",
         "fixture": "test/bins/elf/hello_world",
@@ -1049,6 +1091,7 @@ def knowledge_category_limits() -> dict[str, int]:
         "human-reviewed": int(os.environ.get("AGENTIC_MAX_HUMAN_ROWS", "1000")),
         "online-radare2-docs": int(os.environ.get("AGENTIC_MAX_ONLINE_ROWS", "12")),
         "r2-command-help": int(os.environ.get("AGENTIC_MAX_HELP_ROWS", "80")),
+        "radare2-command-grammar": int(os.environ.get("AGENTIC_MAX_COMMAND_GRAMMAR_ROWS", "240")),
         "r2js": int(os.environ.get("AGENTIC_MAX_R2JS_ROWS", "80")),
         "radare2-plugin-source": int(os.environ.get("AGENTIC_MAX_PLUGIN_SOURCE_ROWS", "64")),
         "radare2-source-docs": int(os.environ.get("AGENTIC_MAX_SOURCE_DOC_ROWS", "80")),
@@ -1121,6 +1164,8 @@ def next_run_path() -> Path:
 
 def knowledge_category(row: dict[str, Any]) -> str:
     topic = str(row.get("topic") or row.get("kind") or "uncategorized")
+    if topic.startswith("grammar."):
+        return "radare2-command-grammar"
     if topic.startswith("cmd."):
         return "r2-command-help"
     if topic.startswith("source."):
@@ -1326,12 +1371,14 @@ def write_knowledge_outputs(new_rows: list[dict[str, Any]], pending_rows: list[d
             "reject navigation-heavy online pages",
             "keep plugin rows as concise symbol summaries, not raw source dumps",
             "source docs use signal extraction instead of full-file excerpts",
+            "mine `?*` command grammar into focused command-construction rows",
             "cap verified r2r workflow rows per source file to avoid low-entropy growth",
             "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
         ],
         "growth_sections": [
             "human-reviewed pending answers",
             "radare2 command help",
+            "radare2 command grammar from `?*`",
             "verified workflows and challenges",
             "radare2 source xrefs",
             "source bug-hunt report in R2BUGS.md",
@@ -1359,6 +1406,1290 @@ def verification_summary(verification: Verification, r2_source: Path, r2_bin: Pa
         "output_sha256": hashlib.sha256(sanitized_output.encode("utf-8")).hexdigest(),
         "output_excerpt": output_excerpt(sanitized_output, 1800),
     }
+
+
+def command_grammar_verification(verification: Verification, r2_source: Path, r2_bin: Path, checks: list[dict[str, Any]], excerpt: str) -> dict[str, Any]:
+    return {
+        "status": verification.status,
+        "returncode": verification.returncode,
+        "elapsed_ms": verification.elapsed_ms,
+        "command_line": sanitize_command_line(verification.command_line, r2_source, r2_bin),
+        "checks": checks,
+        "output_excerpt": output_excerpt(excerpt, 1800),
+    }
+
+
+def command_grammar_excerpt(output: str, needles: list[str], r2_source: Path, limit: int = 1400) -> str:
+    lines: list[str] = []
+    clean = sanitize_text(clean_output(output), r2_source)
+    lowered_needles = [needle.lower() for needle in needles]
+    current_usage = ""
+    for line in clean.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Usage:"):
+            current_usage = stripped
+        haystack = stripped.lower()
+        if any(needle in haystack for needle in lowered_needles):
+            if current_usage and (not lines or lines[-1] != current_usage):
+                lines.append(current_usage)
+            lines.append(stripped)
+        if len("\n".join(lines)) >= limit:
+            break
+    if not lines:
+        lines = [line.strip() for line in clean.splitlines() if line.strip()][:12]
+    return output_excerpt("\n".join(lines), limit)
+
+
+def parse_command_grammar_blocks(output: str, r2_source: Path) -> list[tuple[str, list[str]]]:
+    clean = sanitize_text(clean_output(output), r2_source)
+    blocks: list[tuple[str, list[str]]] = []
+    current: list[str] = []
+    for line in clean.splitlines():
+        stripped = line.rstrip()
+        if stripped.startswith("Usage:"):
+            if current:
+                blocks.append((current[0], current[:80]))
+            current = [stripped]
+            continue
+        if not current:
+            continue
+        if not stripped:
+            continue
+        if stripped.startswith("|") or stripped.endswith(":") or stripped.startswith(("modifier:", "endmodifier:", "column:", "Examples:")):
+            current.append(stripped)
+        elif len(current) < 8:
+            current.append(stripped)
+    if current:
+        blocks.append((current[0], current[:80]))
+    return blocks
+
+
+def command_grammar_token(usage_line: str) -> str:
+    body = usage_line.removeprefix("Usage:").strip()
+    if not body:
+        return "command"
+    token = body.split()[0].strip("[]")
+    return token or "command"
+
+
+def command_grammar_subject(usage_line: str) -> tuple[str, str, str]:
+    body = usage_line.removeprefix("Usage:").strip()
+    if body.startswith("%["):
+        return (
+            "environment",
+            "environment variable commands",
+            "How do `%` commands read and set environment variables inside radare2?",
+        )
+    if body.startswith("(foo"):
+        return (
+            "macros",
+            "command macros",
+            "How do radare2 command macros group and replay command sequences?",
+        )
+    if body.startswith("[.:"):
+        return (
+            "composition",
+            "command composition modifiers",
+            "How do repeat counts, output modes, grep, pipes, and temporary seeks compose radare2 one-liners?",
+        )
+    if body.startswith("-"):
+        return (
+            "dash-aliases",
+            "dash command aliases",
+            "How do dash-prefixed convenience commands map to common radare2 actions?",
+        )
+    token = command_grammar_token(usage_line)
+    subject_id = safe_id_part(token)
+    return (
+        subject_id,
+        f"`{token}` command family",
+        f"How is the `{token}` radare2 command family constructed?",
+    )
+
+
+def command_grammar_focus_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "repeat-prefix-esil-step",
+            "topic": "grammar.command.repeat-prefix",
+            "title": "Repeat prefixes and ESIL stepping",
+            "question": "Why does `3aes` mean three ESIL steps in radare2?",
+            "answer": "A leading decimal number repeats the following radare2 command. `3aes` is parsed as repeat count `3` plus command `aes`; `a` enters the analysis family, `e` selects ESIL, and `s` performs one ESIL step. Use this pattern whenever a command should be repeated without writing `cmd;cmd;cmd`.",
+            "needles": ["prefix with number", "repeat command", "Append '?' to any char command"],
+            "checks": [{"type": "contains", "value": "Prefix with number to repeat command"}],
+            "tags": ["command-grammar", "repeat-prefix", "esil", "aes"],
+        },
+        {
+            "id": "oneliner-shape",
+            "topic": "grammar.command.oneliner",
+            "title": "Radare2 oneliner shape",
+            "question": "What is the general shape of a radare2 oneliner?",
+            "answer": "A radare2 oneliner is a command plus optional composition operators: repeat prefix, output mode suffixes such as `*` or `j`, backtick substitution, temporary seek with `@`, grep with `~`, pipe or redirect. This is why compact commands like `pd 5 @ main`, `afl~main`, and `3aes` are valid building blocks for larger workflows.",
+            "needles": ["[.:\"][#]<cmd>", "@ 0x1024", "~word", "`pdi~push:0[0]`"],
+            "checks": [{"type": "contains", "value": "temporary seek"}, {"type": "contains", "value": "grep for lines matching word"}],
+            "tags": ["command-grammar", "oneliner", "temporary-seek", "grep"],
+        },
+        {
+            "id": "iterators",
+            "topic": "grammar.command.iterators",
+            "title": "Radare2 iterators",
+            "question": "How do `@@` and `@@@` extend radare2 commands across many offsets?",
+            "answer": "The `@@` operator repeats a command over a list of offsets or objects, such as flags, functions, instructions, sections, or search hits. The `@@@` form carries offset and size pairs for commands that need both. Use these for scalable one-liners instead of manually repeating seeks and commands.",
+            "needles": ["@@=1 2 3", "run the previous command", "@@@", "functions matching"],
+            "checks": [{"type": "contains", "value": "@@=1 2 3"}, {"type": "contains", "value": "@@@"}],
+            "tags": ["command-grammar", "iterator", "oneliner"],
+        },
+        {
+            "id": "output-modes",
+            "topic": "grammar.command.output-modes",
+            "title": "Radare2 output modes",
+            "question": "How do `*`, `j`, and `~` change radare2 command output?",
+            "answer": "Many radare2 commands accept suffixes or companion forms for output mode. `*` asks for r2-script output, `j` asks for JSON when supported, and `~` filters output in the console. Training examples should preserve those forms because they are how agents build scripts, parse data, and keep one-liners small.",
+            "needles": ["output of command in r2 script format", "output of command in JSON format", "grep for lines matching word"],
+            "checks": [{"type": "contains", "value": "output of command in JSON format"}],
+            "tags": ["command-grammar", "output-mode", "json", "grep"],
+        },
+    ]
+
+
+def build_command_grammar_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    if limit <= 0:
+        return rows, pending
+    entry = {
+        "id": "knowledge.command_grammar.full_help_probe",
+        "kind": "reasoning_task",
+        "fixture": "--",
+        "starter_commands": ["?*"],
+        "checks": [
+            {"type": "contains", "value": "Append '?' to any char command"},
+            {"type": "contains", "value": "Prefix with number to repeat command"},
+        ],
+        "answer": "",
+        "question": "",
+    }
+    verification = run_entry(entry, r2_bin, r2_source, timeout)
+    if not verification.ok:
+        pending.append(growth_pending("knowledge.command_grammar.full_help_probe", "command-grammar", "Run `?*` to discover the radare2 command grammar", verification, r2_source, ["r2:?*"]))
+        return rows, pending
+
+    output = verification.output
+    for spec in command_grammar_focus_specs():
+        if len(rows) >= limit:
+            break
+        row_id = "knowledge.command_grammar." + safe_id_part(str(spec["id"]))
+        if row_id in seen:
+            continue
+        ok, checks, _reason = evaluate_checks(output, list(spec["checks"]))
+        if not ok:
+            continue
+        excerpt = command_grammar_excerpt(output, list(spec["needles"]), r2_source)
+        answer = f"{spec['answer']}\n\nEvidence from `?*`:\n{excerpt}"
+        rows.append(knowledge_row(
+            row_id,
+            str(spec["topic"]),
+            str(spec["question"]),
+            answer,
+            ["r2:?*"],
+            r2_source,
+            tags=list(spec["tags"]),
+            verification=command_grammar_verification(verification, r2_source, r2_bin, checks, excerpt),
+            title=str(spec["title"]),
+        ))
+        seen.add(row_id)
+
+    for usage_line, block in parse_command_grammar_blocks(output, r2_source):
+        if len(rows) >= limit:
+            break
+        subject_id, subject, question = command_grammar_subject(usage_line)
+        row_id = "knowledge.command_grammar.block." + subject_id + "." + stable_hash(usage_line, length=8)
+        if row_id in seen:
+            continue
+        excerpt = output_excerpt("\n".join(block), 1400)
+        topic = "grammar.command." + subject_id
+        answer = (
+            f"The full `?*` grammar describes {subject} and the variants accepted by the command parser. "
+            f"Read the leftmost letters as the command family and the following letters, suffixes, or arguments as refinements. "
+            f"When building one-liners, combine the family with repeat prefixes, `@` temporary seeks, `~` grep, `j` JSON output, `*` script output, or iterators when the family supports them.\n\n"
+            f"`?*` excerpt:\n{excerpt}"
+        )
+        checks = [{"type": "contains", "value": usage_line[:120]}]
+        ok, checked, _reason = evaluate_checks(output, checks)
+        if not ok:
+            continue
+        rows.append(knowledge_row(
+            row_id,
+            topic,
+            question,
+            answer,
+            ["r2:?*"],
+            r2_source,
+            tags=["command-grammar", "r2cmd", subject_id],
+            verification=command_grammar_verification(verification, r2_source, r2_bin, checked, excerpt),
+            title=subject,
+        ))
+        seen.add(row_id)
+    return rows, pending
+
+
+COMMAND_ROOT_MEANINGS = {
+    "?": "help, numeric expressions, and command introspection",
+    "%": "environment variables",
+    "!": "system command bridge",
+    "#": "comments and hashbang script dispatch",
+    "$": "aliases and numeric variables",
+    "(": "command macros",
+    ".": "script execution, command replay, or current-item modifier",
+    ":": "I/O command bridge",
+    "=": "remote sessions and servers",
+    "/": "search",
+    "a": "analysis",
+    "b": "block size",
+    "C": "comments and metadata",
+    "d": "debugger",
+    "e": "eval configuration",
+    "f": "flags",
+    "i": "binary information",
+    "k": "key-value database",
+    "L": "plugins",
+    "m": "mounts and filesystems",
+    "o": "open files and I/O backends",
+    "p": "print and disassembly",
+    "s": "seek",
+    "S": "sections",
+    "t": "types",
+    "T": "text log",
+    "u": "undo or host information",
+    "w": "write and patch",
+    "x": "hex dump alias",
+    "y": "yank/copy buffer",
+    "z": "zignatures",
+}
+
+COMMAND_CONTEXT_LETTER_MEANINGS = {
+    ("a", "a"): "automatic analysis",
+    ("aa", "a"): "deeper automatic analysis",
+    ("a", "e"): "ESIL",
+    ("ae", "s"): "step one ESIL instruction",
+    ("a", "f"): "function",
+    ("af", "a"): "analyze function",
+    ("af", "b"): "basic blocks",
+    ("af", "l"): "list",
+    ("af", "n"): "name",
+    ("af", "s"): "function size",
+    ("af", "x"): "cross references",
+    ("afl", "j"): "JSON output",
+    ("afl", "q"): "quiet output",
+    ("afl", "x"): "xref-oriented listing",
+    ("a", "g"): "graph",
+    ("a", "o"): "opcode",
+    ("a", "r"): "registers",
+    ("a", "s"): "symbols",
+    ("a", "x"): "cross references",
+    ("ax", "t"): "references to an address",
+    ("ax", "f"): "references from an address",
+    ("C", "C"): "comments",
+    ("d", "b"): "breakpoints",
+    ("d", "c"): "continue",
+    ("d", "m"): "memory maps",
+    ("d", "r"): "registers",
+    ("d", "s"): "step",
+    ("f", "s"): "flag spaces",
+    ("i", "i"): "imports",
+    ("i", "E"): "exports",
+    ("i", "S"): "sections",
+    ("i", "z"): "strings",
+    ("i", "I"): "file information",
+    ("p", "8"): "raw bytes as hexpairs",
+    ("p", "c"): "bytes as code or C output",
+    ("p", "d"): "disassembly",
+    ("p", "f"): "format data",
+    ("p", "i"): "instructions",
+    ("p", "x"): "hexadecimal dump",
+    ("pd", "f"): "disassemble function",
+    ("pd", "j"): "JSON disassembly",
+    ("px", "w"): "32-bit word hexdump",
+    ("s", "+"): "seek forward",
+    ("s", "-"): "seek backward",
+    ("s", "e"): "seek end",
+    ("s", "r"): "seek relative",
+    ("t", "s"): "structs",
+    ("t", "t"): "typedefs",
+    ("t", "u"): "unions",
+    ("w", "a"): "write assembled opcode",
+    ("w", "c"): "write cache",
+    ("w", "f"): "write file contents",
+    ("w", "o"): "write with operation",
+    ("w", "v"): "write numeric value",
+    ("w", "x"): "write hexpairs",
+    ("y", "y"): "paste yanked data",
+    ("z", "a"): "add zignature",
+    ("z", "f"): "FLIRT signatures",
+    ("z", "s"): "zignature spaces",
+}
+
+COMMAND_SUFFIX_MEANINGS = {
+    "?": "show help for the current command family",
+    "*": "emit r2 script commands",
+    "j": "emit JSON output when supported",
+    "q": "quiet or compact output",
+    "v": "verbose or value-oriented output",
+    "l": "list",
+    "-": "delete, remove, or move backward depending on family",
+    "+": "add, append, or move forward depending on family",
+    ".": "operate at the current offset or current object",
+}
+
+COMMAND_SYSTEM_PROMPT = (
+    "You are a radare2 command trainer. Explain command construction, "
+    "subcommand letters, prefixes, suffixes, modifiers, and executable examples."
+)
+
+
+def utc_timestamp() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_command_token(raw: str) -> str:
+    token = raw.strip().strip("`'\"")
+    if not token:
+        return ""
+    if token.startswith("%["):
+        return "%"
+    if token.startswith("(foo") or token.startswith("("):
+        return "("
+    if token.startswith("[.:"):
+        return "commandline"
+    if token.startswith("@@@"):
+        return "@@@"
+    if token.startswith("@@"):
+        return "@@"
+    if token.startswith("--"):
+        return "--"
+    token = token.replace("\\n", "")
+    token = re.sub(r"\[.*", "", token)
+    token = re.sub(r"<.*", "", token)
+    token = re.sub(r"\(.*", "", token) if not token.startswith("(") else token
+    token = token.strip()
+    if not token:
+        return ""
+    token = token.split()[0].strip(" ,;:")
+    if token.startswith("|"):
+        token = token[1:].strip()
+    if token in {"Usage", "Usage:", "Examples", "Environment"}:
+        return ""
+    return token[:48]
+
+
+def command_token_is_useful(token: str) -> bool:
+    if not token or token in {"-", "--"}:
+        return bool(token == "--")
+    if len(token) > 48:
+        return False
+    if re.match(r"^[A-Za-z0-9_]+:", token):
+        return False
+    return any(ch.isalnum() or ch in "?!%#$().:=/@+-*" for ch in token)
+
+
+def command_line_summary(line: str, token: str) -> str:
+    body = line.strip()
+    if body.startswith("|"):
+        body = body[1:].strip()
+    if body.startswith("Usage:"):
+        body = body.removeprefix("Usage:").strip()
+    parts = re.split(r"\s{2,}", body, maxsplit=1)
+    if len(parts) == 2:
+        return parts[1].strip()
+    body = body.removeprefix(token).strip(" -#")
+    return body.strip()
+
+
+def command_candidates_from_block(usage_line: str, block: list[str], source_ref: str, max_variants: int) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    usage_body = usage_line.removeprefix("Usage:").strip()
+    usage_token = normalize_command_token(usage_body)
+    subject_id, subject, question = command_grammar_subject(usage_line)
+    if command_token_is_useful(usage_token):
+        syntax = re.split(r"\s{2,}", usage_body, maxsplit=1)[0].strip() or usage_token
+        candidates.append({
+            "command": usage_token,
+            "syntax": syntax,
+            "summary": command_line_summary(usage_line, usage_token) or subject,
+            "question": f"How does the radare2 command `{usage_token}` work and how is it constructed?",
+            "line": usage_line,
+            "source_ref": source_ref,
+        })
+    in_non_command_section = False
+    for line in block[1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        section_name = stripped.lstrip("| ").rstrip(":")
+        if section_name in {"Environment", "Examples", "Argument support", "modifier", "endmodifier", "column"}:
+            in_non_command_section = True
+            continue
+        if not stripped.startswith("|") or in_non_command_section:
+            continue
+        body = stripped[1:].strip()
+        if not body or body.startswith(("#", "NOTE:", "WIP:")):
+            continue
+        raw_token = body.split()[0]
+        command = normalize_command_token(raw_token)
+        if not command_token_is_useful(command):
+            continue
+        candidates.append({
+            "command": command,
+            "syntax": raw_token,
+            "summary": command_line_summary(stripped, raw_token),
+            "question": f"How does the radare2 command `{command}` work and how is it constructed?",
+            "line": stripped,
+            "source_ref": source_ref,
+        })
+        if len(candidates) >= max_variants + 1:
+            break
+    return candidates
+
+
+def command_decomposition(command: str) -> tuple[list[dict[str, Any]], list[str]]:
+    if command == "commandline":
+        return ([{"part": "commandline", "meaning": "full command-line composition syntax", "known": True}], [])
+    if command in {"@@", "@@@"}:
+        meaning = "iterator over offsets" if command == "@@" else "iterator over offset and size pairs"
+        return ([{"part": command, "meaning": meaning, "known": True}], [])
+    if command in COMMAND_ROOT_MEANINGS:
+        return ([{"part": command, "meaning": COMMAND_ROOT_MEANINGS[command], "known": True}], [])
+    parts: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    prefix = ""
+    for index, ch in enumerate(command):
+        if ch.isspace():
+            break
+        if ch in "[]<>,;`'\"":
+            continue
+        meaning = COMMAND_CONTEXT_LETTER_MEANINGS.get((prefix, ch))
+        if meaning is None and index == 0:
+            meaning = COMMAND_ROOT_MEANINGS.get(ch)
+        if meaning is None:
+            meaning = COMMAND_SUFFIX_MEANINGS.get(ch)
+        known = meaning is not None
+        if meaning is None:
+            meaning = "unknown in this local command model"
+            unknown.append(ch)
+        parts.append({"part": ch, "prefix": prefix + ch, "meaning": meaning, "known": known})
+        prefix += ch
+    return parts, unknown
+
+
+def command_decomposition_text(command: str, parts: list[dict[str, Any]]) -> str:
+    if not parts:
+        return "No command-letter decomposition was inferred."
+    rendered = []
+    for part in parts:
+        name = str(part.get("part", ""))
+        meaning = str(part.get("meaning", ""))
+        prefix = str(part.get("prefix", name))
+        if prefix and prefix != name and len(name) == 1:
+            rendered.append(f"`{name}` under `{prefix[:-1]}` means {meaning}")
+        else:
+            rendered.append(f"`{name}` means {meaning}")
+    return "; ".join(rendered) + "."
+
+
+def command_row_from_candidate(candidate: dict[str, Any], verification: Verification, r2_source: Path, r2_bin: Path) -> dict[str, Any]:
+    command = str(candidate["command"])
+    parts, unknown = command_decomposition(command)
+    summary = str(candidate.get("summary") or "").strip()
+    syntax = str(candidate.get("syntax") or command).strip()
+    line = str(candidate.get("line") or "").strip()
+    source_ref = str(candidate.get("source_ref") or "r2:?*")
+    status = "needs-memory" if unknown or len(summary) < 8 else "documented"
+    decomposition = command_decomposition_text(command, parts)
+    if command == "afl":
+        summary = summary or "list all analyzed functions"
+    answer_parts = [
+        f"`{command}` is documented by radare2 syntax `{syntax}`.",
+        f"Command construction: {decomposition}",
+    ]
+    if summary:
+        answer_parts.append(f"Documented behavior: {summary}.")
+    if status == "needs-memory":
+        answer_parts.append("This row is marked `needs-memory` because the local model could not confidently explain every letter or the help text is too thin; ask a human to refine it with `make memory`.")
+    answer_parts.append(f"Evidence line from `{source_ref}`:\n{line}")
+    question = str(candidate.get("question") or f"How does the radare2 command `{command}` work?")
+    fingerprint = stable_hash(command, syntax, summary, decomposition, line)
+    row_id = "agentic.command." + safe_id_part(command) + "." + stable_hash(source_ref, command, length=8)
+    checks = [{"type": "contains", "value": line[:120]}] if line else [{"type": "nonempty"}]
+    ok, checked, _reason = evaluate_checks(verification.output, checks)
+    if not ok:
+        checked = verification.checks
+    return {
+        "command": command,
+        "content_fingerprint": fingerprint,
+        "decomposition": parts,
+        "id": row_id,
+        "kind": "agentic_command",
+        "messages": [
+            {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+            {"role": "user", "content": question},
+            {"role": "assistant", "content": "\n\n".join(answer_parts)},
+        ],
+        "source_refs": [source_ref],
+        "status": status,
+        "syntax": syntax,
+        "tags": ["agentic-command", "radare2-command", "command-grammar", status],
+        "topic": "command." + safe_id_part(command),
+        "unknown_parts": unknown,
+        "verification": {
+            "status": verification.status,
+            "returncode": verification.returncode,
+            "command_line": sanitize_command_line(verification.command_line, r2_source, r2_bin),
+            "checks": checked,
+            "output_excerpt": output_excerpt(sanitize_text("\n".join([line] if line else verification.output.splitlines()[:6]), r2_source), 1200),
+        },
+    }
+
+
+def merge_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_command: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        command = str(row.get("command", ""))
+        if not command:
+            continue
+        old = by_command.get(command)
+        if old is None:
+            by_command[command] = row
+            continue
+        old_score = (0 if old.get("status") == "documented" else -2) + len(row_message_content(old, "assistant")) // 200
+        new_score = (0 if row.get("status") == "documented" else -2) + len(row_message_content(row, "assistant")) // 200
+        if new_score >= old_score:
+            refs = list(dict.fromkeys(list(old.get("source_refs", [])) + list(row.get("source_refs", []))))
+            row["source_refs"] = refs
+            by_command[command] = row
+    return sorted(by_command.values(), key=lambda item: safe_id_part(str(item.get("command", ""))))
+
+
+def command_training_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for row in rows:
+        out.append({
+            "content_fingerprint": row.get("content_fingerprint", ""),
+            "id": row.get("id", ""),
+            "kind": "agentic_command",
+            "messages": row.get("messages", []),
+            "source_refs": row.get("source_refs", []),
+            "tags": row.get("tags", []),
+            "topic": row.get("topic", ""),
+            "verification": row.get("verification", {}),
+        })
+    return out
+
+
+
+GENERIC_COMMAND_MEMORY_TAGS = {
+    "radare2",
+    "command",
+    "commands",
+    "command-grammar",
+    "agentic-commands",
+    "training-data",
+    "memory",
+    "shell",
+    "analysis",
+    "command-composition",
+    "esil",
+    "exit",
+    "function-list",
+    "io",
+    "move",
+    "projects",
+    "quit",
+    "repeat-prefix",
+    "restore",
+    "save",
+    "seek",
+}
+
+
+def command_lookup_maps(rows: list[dict[str, Any]]) -> tuple[set[str], dict[str, str]]:
+    commands = {str(row.get("command", "")) for row in rows if row.get("command")}
+    lower: dict[str, str] = {}
+    for command in commands:
+        lower.setdefault(command.lower(), command)
+    return commands, lower
+
+
+def memory_row_text(row: dict[str, Any]) -> str:
+    parts = [
+        str(row.get("topic", "")),
+        str(row.get("question", "")),
+        str(row.get("highlight", "")),
+        str(row.get("details", "")),
+    ]
+    parts.extend(str(tag) for tag in row.get("tags", []) if str(tag).strip())
+    return "\n".join(part for part in parts if part.strip())
+
+
+def candidate_memory_commands(row: dict[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    topic_question = "\n".join(str(row.get(key, "")) for key in ("topic", "question"))
+    full_text = memory_row_text(row)
+    for match in re.finditer(r"radare2 command [`'\"]([^`'\"]{1,48})[`'\"]", topic_question, re.IGNORECASE):
+        candidates.append(match.group(1))
+    for tag in row.get("tags", []):
+        tag_value = str(tag).strip()
+        if tag_value and tag_value.lower() not in GENERIC_COMMAND_MEMORY_TAGS:
+            candidates.append(tag_value)
+    for match in re.finditer(r"`([^`]{1,48})`", topic_question):
+        candidates.append(match.group(1))
+    for match in re.finditer(r"(?<![A-Za-z0-9_])\d+[A-Za-z][A-Za-z0-9_?!+*.-]{1,24}(?![A-Za-z0-9_])", full_text):
+        candidates.append(match.group(0))
+    return list(dict.fromkeys(candidates))
+
+
+def match_memory_command(raw: str, command_set: set[str], lower_lookup: dict[str, str]) -> list[str]:
+    token = normalize_command_token(raw)
+    if not token:
+        return []
+    if token in command_set:
+        return [token]
+    if len(token) == 1 and token.isupper():
+        return []
+    if token.lower() in lower_lookup:
+        return [lower_lookup[token.lower()]]
+    if token.startswith("0x") and "0xaddr" in command_set:
+        return ["0xaddr"]
+    if token.startswith("-") and token[:2] in command_set:
+        return [token[:2]]
+    return []
+
+
+def accepted_command_memories(rows: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    command_set, lower_lookup = command_lookup_maps(rows)
+    by_command: dict[str, list[dict[str, Any]]] = {}
+    unmatched: list[dict[str, Any]] = []
+    for memory in read_jsonl(MEMORY_PATH):
+        if memory.get("status") != "accepted":
+            continue
+        text = memory_row_text(memory).lower()
+        if "radare2" not in text:
+            continue
+        matches: list[str] = []
+        for candidate in candidate_memory_commands(memory):
+            matches.extend(match_memory_command(candidate, command_set, lower_lookup))
+        matches = list(dict.fromkeys(matches))
+        if not matches:
+            unmatched.append(memory)
+            continue
+        for command in matches:
+            by_command.setdefault(command, []).append(memory)
+    return by_command, unmatched
+
+
+def memory_to_command_guess(memory: dict[str, Any]) -> str:
+    for candidate in candidate_memory_commands(memory):
+        token = normalize_command_token(candidate)
+        if token and token.lower() not in GENERIC_COMMAND_MEMORY_TAGS:
+            return token
+    return ""
+
+
+def command_memory_answer_section(memories: list[dict[str, Any]]) -> str:
+    sections = []
+    for memory in memories:
+        highlight = str(memory.get("highlight", "")).strip()
+        details = str(memory.get("details", "")).strip()
+        memory_id = str(memory.get("id", "")).strip()
+        body = []
+        if highlight:
+            body.append(highlight)
+        if details:
+            body.append("Details:\n" + details)
+        if memory_id:
+            body.append(f"Memory id: {memory_id}")
+        if body:
+            sections.append("\n".join(body))
+    if not sections:
+        return ""
+    return "Human memory:\n" + "\n\n".join(sections)
+
+
+def strip_needs_memory_notice(answer: str) -> str:
+    notice = "This row is marked `needs-memory` because the local model could not confidently explain every letter or the help text is too thin; ask a human to refine it with `make memory`."
+    return answer.replace("\n\n" + notice, "").replace(notice + "\n\n", "").replace(notice, "").strip()
+
+
+def apply_command_memories(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
+    by_command, unmatched = accepted_command_memories(rows)
+    output: list[dict[str, Any]] = []
+    applied = 0
+    for row in rows:
+        command = str(row.get("command", ""))
+        memories = by_command.get(command, [])
+        if not memories:
+            output.append(row)
+            continue
+        updated = copy.deepcopy(row)
+        answer = strip_needs_memory_notice(row_message_content(updated, "assistant"))
+        memory_section = command_memory_answer_section(memories)
+        if memory_section and memory_section not in answer:
+            answer = answer.rstrip() + "\n\n" + memory_section
+        for message in updated.get("messages", []):
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                message["content"] = answer
+        previous_unknown = list(updated.get("unknown_parts", []))
+        updated["memory_refs"] = [str(memory.get("id")) for memory in memories if memory.get("id")]
+        updated["memory_resolved_parts"] = previous_unknown
+        updated["unknown_parts"] = []
+        updated["status"] = "human-reviewed"
+        tags = [str(tag) for tag in updated.get("tags", []) if str(tag) not in {"needs-memory", "documented", "human-reviewed"}]
+        updated["tags"] = list(dict.fromkeys([*tags, "human-reviewed", "human-memory"]))
+        refs = list(updated.get("source_refs", []))
+        refs.append("data/memory/memory.jsonl")
+        updated["source_refs"] = list(dict.fromkeys(refs))
+        updated["content_fingerprint"] = stable_hash(row.get("content_fingerprint", ""), *(memory.get("content_fingerprint", memory.get("id", "")) for memory in memories))
+        output.append(updated)
+        applied += len(memories)
+
+    command_set = {str(row.get("command", "")) for row in output if row.get("command")}
+    synthetic = 0
+    for memory in unmatched:
+        command = memory_to_command_guess(memory)
+        if not command or command in command_set:
+            continue
+        parts, _unknown = command_decomposition(command)
+        section = command_memory_answer_section([memory])
+        row_id = "agentic.command.memory." + safe_id_part(command) + "." + stable_hash(memory.get("id", command), length=8)
+        output.append({
+            "command": command,
+            "content_fingerprint": stable_hash(command, memory.get("content_fingerprint", memory.get("id", ""))),
+            "decomposition": parts,
+            "id": row_id,
+            "kind": "agentic_command",
+            "memory_refs": [str(memory.get("id"))] if memory.get("id") else [],
+            "messages": [
+                {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+                {"role": "user", "content": f"How does the radare2 command `{command}` work and how is it constructed?"},
+                {"role": "assistant", "content": section or str(memory.get("highlight", ""))},
+            ],
+            "source_refs": ["data/memory/memory.jsonl"],
+            "status": "human-reviewed",
+            "syntax": command,
+            "tags": ["agentic-command", "radare2-command", "command-grammar", "human-reviewed", "human-memory"],
+            "topic": "command." + safe_id_part(command),
+            "unknown_parts": [],
+        })
+        command_set.add(command)
+        synthetic += 1
+    return sorted(output, key=lambda item: safe_id_part(str(item.get("command", "")))), applied, synthetic
+
+
+def command_memory_topic(row: dict[str, Any]) -> dict[str, Any]:
+    command = str(row.get("command", ""))
+    unknown = ", ".join(map(str, row.get("unknown_parts", []))) or "thin help text"
+    topic = f"radare2 command `{command}` decomposition"
+    question = (
+        f"Please clarify the radare2 command `{command}`: explain what each letter, suffix, or modifier means, "
+        f"how it composes with parent command families, and give one precise usage example. Current gap: {unknown}."
+    )
+    return {
+        "created_at": utc_timestamp(),
+        "id": "topic." + stable_hash(topic, question),
+        "question": question,
+        "source": {"channel": "agentic-commands"},
+        "status": "pending",
+        "tags": ["radare2", "command-grammar", "agentic-commands", safe_id_part(command)],
+        "topic": topic,
+    }
+
+
+def existing_memory_topics_and_facts() -> set[str]:
+    seen: set[str] = set()
+    for path in (MEMORY_TOPICS_PATH, MEMORY_PATH):
+        for row in read_jsonl(path):
+            if row.get("id"):
+                seen.add(str(row.get("id")))
+            topic = str(row.get("topic", ""))
+            if topic:
+                seen.add(topic)
+    return seen
+
+
+def queue_command_memory_topics(
+    topics: list[dict[str, Any]],
+    queue_memory: bool,
+    output_path: Path = COMMANDS_MEMORY_TOPICS_PATH,
+) -> tuple[int, int]:
+    write_jsonl(output_path, topics)
+    if not queue_memory:
+        return len(topics), 0
+    existing_rows = read_jsonl(MEMORY_TOPICS_PATH)
+    seen_ids = {str(row.get("id")) for row in existing_rows if row.get("id")}
+    seen_topics = {str(row.get("topic")) for row in existing_rows if row.get("topic")}
+    queued = []
+    for topic in topics:
+        topic_id = str(topic.get("id", ""))
+        topic_name = str(topic.get("topic", ""))
+        if topic_id and topic_id not in seen_ids and topic_name not in seen_topics:
+            queued.append(topic)
+            seen_ids.add(topic_id)
+            seen_topics.add(topic_name)
+    if queued:
+        write_jsonl_if_changed(MEMORY_TOPICS_PATH, existing_rows + queued)
+    return len(topics), len(queued)
+
+
+COMMAND_EXPRESSION_DENY_WORDS = {
+    "",
+    "--",
+    "-",
+    "main",
+    "entry0",
+    "hello",
+    "phase",
+    "write",
+    "true",
+    "false",
+    "null",
+}
+
+COMMAND_EXPRESSION_DENY_PREFIXES = (
+    "./",
+    "../",
+    "/",
+    "http://",
+    "https://",
+    "malloc://",
+    "hex://",
+    "test/",
+    "libr/",
+    "bin/",
+    "scripts/",
+    "str.",
+    "sym.",
+    "fcn.",
+    "loc.",
+    "section.",
+    "reloc.",
+    "radare2 ",
+    "r2 ",
+    "rabin2 ",
+    "rasm2 ",
+)
+
+COMMON_R2_COMMAND_RE = re.compile(
+    r"^(?:"
+    r"a{1,5}|a[efxobrst][A-Za-z0-9_.+*?=-]*|"
+    r"p(?:$|[dx8ifcjsoD][A-Za-z0-9_.+*?=-]*)|"
+    r"i(?:$|[IizESVROAjq*?+\-][A-Za-z0-9_.+*?=-]*)|"
+    r"d(?:$|[bcmsr][A-Za-z0-9_.+*?=-]*)|"
+    r"e|s[+-]*|w[A-Za-z0-9_.+*?=-]*|"
+    r"o[A-Za-z0-9_.+*?=-]*|m|md|L[A-Za-z0-9_.+*?=-]*|"
+    r"\?.+|[+-]\d+"
+    r")$"
+)
+
+
+def clean_knowledge_command_expression(raw: str) -> str:
+    expr = raw.strip().strip("`'\"")
+    expr = expr.replace("\\n", " ").replace("\n", " ")
+    expr = re.sub(r"\s+", " ", expr).strip()
+    if expr.endswith(".") and not expr.startswith("."):
+        expr = expr[:-1].rstrip()
+    return expr[:160]
+
+
+def command_expression_base(expression: str) -> str:
+    expr = expression.strip()
+    if not expr:
+        return ""
+    if expr.startswith("("):
+        return "("
+    if expr.startswith("js:"):
+        return "js:"
+    token = re.split(r"\s+", expr, maxsplit=1)[0]
+    token = re.split(r"[@~|><;]", token, maxsplit=1)[0]
+    if re.match(r"^[+-]\d+$", token):
+        return token[:2]
+    if re.match(r"^\d+[A-Za-z]", token):
+        token = re.sub(r"^\d+", "", token)
+    return normalize_command_token(token)
+
+
+def command_expression_is_composed(expression: str) -> bool:
+    expr = expression.strip()
+    base = command_expression_base(expr)
+    if not expr or not base:
+        return False
+    if re.match(r"^\d+[A-Za-z]", expr):
+        return True
+    if expr != base and (" " in expr or any(mark in expr for mark in ("@", "~", "@@", ";", "|", ">", "<", "`", "$"))):
+        return True
+    return False
+
+
+def is_probable_r2_command_expression(expression: str, command_names: set[str]) -> bool:
+    expr = expression.strip()
+    if not expr or len(expr) > 160:
+        return False
+    lower = expr.lower()
+    if lower in COMMAND_EXPRESSION_DENY_WORDS:
+        return False
+    if lower.startswith(COMMAND_EXPRESSION_DENY_PREFIXES):
+        return False
+    if re.fullmatch(r"(?:0x[0-9a-fA-F]+|\d+|[A-Za-z0-9_.-]+\.(?:c|h|md|json|txt|bin|exe|img|o|so|dylib))", expr):
+        return False
+    if re.fullmatch(r"[A-Za-z][A-Za-z0-9+.-]*://.*", expr):
+        return False
+    base = command_expression_base(expr)
+    if not base or base.lower() in COMMAND_EXPRESSION_DENY_WORDS:
+        return False
+    if expr in command_names or base in command_names:
+        return True
+    if expr.startswith("js:"):
+        return True
+    if base in COMMAND_ROOT_MEANINGS:
+        return True
+    if base and base[0] in COMMAND_ROOT_MEANINGS and command_expression_is_composed(expr):
+        return True
+    return bool(COMMON_R2_COMMAND_RE.match(base))
+
+
+def knowledge_command_expressions_from_row(row: dict[str, Any]) -> list[str]:
+    expressions: list[str] = []
+    verification = row.get("verification")
+    if isinstance(verification, dict):
+        command_line = verification.get("command_line")
+        if isinstance(command_line, list):
+            for idx, arg in enumerate(command_line[:-1]):
+                if arg == "-c":
+                    expressions.append(str(command_line[idx + 1]))
+    text = "\n".join(
+        part for part in (
+            row_message_content(row, "user"),
+            row_message_content(row, "assistant"),
+        )
+        if part
+    )
+    for line in text.splitlines():
+        match = re.match(r"^\s*-\s+`([^`]{1,160})`\s*$", line)
+        if match:
+            expressions.append(match.group(1))
+    for match in re.finditer(r"`([^`\n]{1,160})`", text):
+        expressions.append(match.group(1))
+    return list(dict.fromkeys(clean_knowledge_command_expression(expr) for expr in expressions if clean_knowledge_command_expression(expr)))
+
+
+def knowledge_command_usage_items(command_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    command_names = {str(row.get("command")) for row in command_rows if row.get("command")}
+    by_expression: dict[str, dict[str, Any]] = {}
+    for row in read_jsonl(KNOWLEDGE_PATH):
+        row_id = str(row.get("id", ""))
+        if not row_id:
+            continue
+        row_topic = str(row.get("topic", ""))
+        row_refs = [str(ref) for ref in row.get("source_refs", []) if str(ref).strip()]
+        seen_in_row: set[str] = set()
+        for expression in knowledge_command_expressions_from_row(row):
+            if expression in seen_in_row or not is_probable_r2_command_expression(expression, command_names):
+                continue
+            seen_in_row.add(expression)
+            item = by_expression.setdefault(expression, {
+                "expression": expression,
+                "base": command_expression_base(expression),
+                "count": 0,
+                "knowledge_ids": [],
+                "knowledge_topics": [],
+                "source_refs": [],
+            })
+            item["count"] += 1
+            if row_id not in item["knowledge_ids"]:
+                item["knowledge_ids"].append(row_id)
+            if row_topic and row_topic not in item["knowledge_topics"]:
+                item["knowledge_topics"].append(row_topic)
+            for ref in row_refs:
+                if ref not in item["source_refs"]:
+                    item["source_refs"].append(ref)
+    return list(by_expression.values())
+
+
+def command_row_for_expression(expression: str, command_rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    command_set, lower_lookup = command_lookup_maps(command_rows)
+    candidates = [expression, command_expression_base(expression)]
+    for candidate in candidates:
+        for command in match_memory_command(candidate, command_set, lower_lookup):
+            for row in command_rows:
+                if row.get("command") == command:
+                    return row
+    return None
+
+
+def should_ask_knowledge_command_question(item: dict[str, Any], command_row: dict[str, Any] | None) -> bool:
+    expression = str(item.get("expression", ""))
+    if not expression:
+        return False
+    status = str(command_row.get("status")) if command_row else "missing-command-row"
+    if status in {"needs-memory", "missing-command-row"}:
+        return True
+    return command_expression_is_composed(expression)
+
+
+def knowledge_command_memory_topic(item: dict[str, Any], command_row: dict[str, Any] | None) -> dict[str, Any]:
+    expression = str(item.get("expression", ""))
+    base = str(item.get("base", "")) or expression
+    status = str(command_row.get("status")) if command_row else "missing-command-row"
+    unknown = ", ".join(map(str, command_row.get("unknown_parts", []))) if command_row else "not present in command database"
+    if not unknown:
+        unknown = "real workflow composition"
+    knowledge_ids = [str(value) for value in item.get("knowledge_ids", [])][:4]
+    source_refs = [str(value) for value in item.get("source_refs", [])][:4]
+    topic = f"radare2 knowledge command `{expression}` workflow usage"
+    question = (
+        f"The existing agentic knowledge database uses `{expression}` in verified workflow rows "
+        f"{', '.join(knowledge_ids) or 'unknown'}. Please explain how this radare2 command expression is constructed: "
+        f"base command `{base}`, command letters/subcommands, arguments, repeat prefixes, output suffixes, "
+        f"and modifiers such as `@`, `~`, `@@`, pipes, or redirection. Also explain why it is used in that workflow. "
+        f"Current command database status: {status}; gap: {unknown}."
+    )
+    return {
+        "created_at": utc_timestamp(),
+        "id": "topic." + stable_hash(topic, question),
+        "question": question,
+        "source": {
+            "channel": "agentic-knowledge",
+            "knowledge_ids": knowledge_ids,
+            "source_refs": source_refs,
+        },
+        "status": "pending",
+        "tags": ["radare2", "command-grammar", "agentic-commands", "knowledge-db", safe_id_part(base)],
+        "topic": topic,
+    }
+
+
+def knowledge_command_memory_topics(limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    command_rows = read_jsonl(COMMANDS_DB_PATH)
+    existing = existing_memory_topics_and_facts()
+    topics: list[dict[str, Any]] = []
+    ranked: list[tuple[tuple[int, int, int, str], dict[str, Any], dict[str, Any] | None]] = []
+    for item in knowledge_command_usage_items(command_rows):
+        command_row = command_row_for_expression(str(item.get("expression", "")), command_rows)
+        if not should_ask_knowledge_command_question(item, command_row):
+            continue
+        status = str(command_row.get("status")) if command_row else "missing-command-row"
+        weak_rank = 0 if status in {"needs-memory", "missing-command-row"} else 1
+        composed_rank = 0 if command_expression_is_composed(str(item.get("expression", ""))) else 1
+        ranked.append((
+            (weak_rank, composed_rank, -int(item.get("count", 0)), safe_id_part(str(item.get("expression", "")))),
+            item,
+            command_row,
+        ))
+    max_per_base = max(1, int(os.environ.get("AGENTIC_KNOWLEDGE_COMMAND_MAX_PER_BASE", "3")))
+    per_base: dict[str, int] = {}
+    for _rank, item, command_row in sorted(ranked, key=lambda value: value[0]):
+        if len(topics) >= limit:
+            break
+        base = str(item.get("base", ""))
+        if per_base.get(base, 0) >= max_per_base:
+            continue
+        topic = knowledge_command_memory_topic(item, command_row)
+        if topic["id"] in existing or topic["topic"] in existing:
+            continue
+        topics.append(topic)
+        per_base[base] = per_base.get(base, 0) + 1
+        existing.add(topic["id"])
+        existing.add(topic["topic"])
+    return topics
+
+
+
+def heuristic_command_memory_topics(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    existing = existing_memory_topics_and_facts()
+    topics: list[dict[str, Any]] = []
+    priority = sorted(rows, key=lambda row: (row.get("status") != "needs-memory", len(str(row.get("command", "")))))
+    for row in priority:
+        if len(topics) >= limit:
+            break
+        if row.get("status") != "needs-memory":
+            continue
+        topic = command_memory_topic(row)
+        if topic["id"] in existing or topic["topic"] in existing:
+            continue
+        topics.append(topic)
+        existing.add(topic["id"])
+        existing.add(topic["topic"])
+    return topics
+
+
+def ai_command_memory_topics(gaps: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    mode = args.ai
+    if mode == "off" or not gaps:
+        return []
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        if mode == "required":
+            raise SystemExit("OPENAI_API_KEY is required for --ai required")
+        return []
+    try:
+        import openai  # type: ignore
+    except ImportError as exc:
+        if mode == "required":
+            raise SystemExit("The openai package is required for --ai required") from exc
+        return []
+    sample = [
+        {
+            "command": row.get("command"),
+            "syntax": row.get("syntax"),
+            "unknown_parts": row.get("unknown_parts", []),
+            "answer": row_message_content(row, "assistant")[:800],
+        }
+        for row in gaps[: args.memory_limit]
+    ]
+    prompt = (
+        "You are improving a radare2 command-learning memory queue. "
+        "Given command rows with weak decomposition, return JSON list items with topic, question, and tags. "
+        "Ask questions a human can answer to explain each command letter, suffix, modifier, and one usage example.\n\n"
+        + json.dumps(sample, ensure_ascii=False, indent=2)
+    )
+    client = openai.OpenAI(base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+    response = client.chat.completions.create(
+        model=args.model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=args.temperature,
+        top_p=0.9,
+        max_tokens=4000,
+    )
+    raw = (response.choices[0].message.content or "[]").replace("```json", "").replace("```", "").strip()
+    proposals_path = COMMANDS_DIR / "ai-memory-topics-raw.txt"
+    proposals_path.write_text(raw, encoding="utf-8")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        if mode == "required":
+            raise SystemExit(f"model did not return JSON; raw output saved to {repo_path_ref(proposals_path)}")
+        return []
+    topics: list[dict[str, Any]] = []
+    if not isinstance(parsed, list):
+        return topics
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        topic = str(item.get("topic", "")).strip()
+        question = str(item.get("question", "")).strip()
+        if not topic or not question:
+            continue
+        tags = item.get("tags", [])
+        if not isinstance(tags, list):
+            tags = []
+        tag_values = [str(tag) for tag in tags if str(tag).strip()]
+        topics.append({
+            "created_at": utc_timestamp(),
+            "id": "topic." + stable_hash(topic, question),
+            "question": question,
+            "source": {"channel": "agentic-commands-ai"},
+            "status": "pending",
+            "tags": list(dict.fromkeys(["radare2", "command-grammar", "agentic-commands", *tag_values])),
+            "topic": topic,
+        })
+        if len(topics) >= args.memory_limit:
+            break
+    return topics
+
+
+def build_agentic_command_database(args: argparse.Namespace) -> int:
+    r2_bin = pick_r2_bin(args.r2_bin)
+    r2_source = Path(args.r2_source)
+    rows: list[dict[str, Any]] = []
+    help_topics = list(dict.fromkeys((topic, command, title, tuple(refs)) for topic, command, title, refs in GROWTH_HELP_TOPICS))
+    variants_per_block = max(1, args.variants_per_block)
+    for _topic, command, _title, refs_tuple in help_topics:
+        entry = {"id": f"agentic.commands.help.{safe_id_part(command)}", "kind": "r2cmd", "answer": command, "fixture": "--", "checks": [{"type": "nonempty"}]}
+        verification = run_entry(entry, r2_bin, r2_source, args.timeout)
+        if not verification.ok:
+            continue
+        source_ref = f"r2:{command}"
+        refs = [source_ref, *list(refs_tuple)]
+        for usage_line, block in parse_command_grammar_blocks(verification.output, r2_source):
+            for candidate in command_candidates_from_block(usage_line, block, source_ref, variants_per_block):
+                row = command_row_from_candidate(candidate, verification, r2_source, r2_bin)
+                row["source_refs"] = list(dict.fromkeys(refs + row.get("source_refs", [])))
+                rows.append(row)
+    full_entry = {
+        "id": "agentic.commands.full_help",
+        "kind": "reasoning_task",
+        "fixture": "--",
+        "starter_commands": ["?*"],
+        "checks": [{"type": "contains", "value": "Append '?' to any char command"}],
+        "answer": "",
+        "question": "",
+    }
+    verification = run_entry(full_entry, r2_bin, r2_source, args.timeout)
+    if verification.ok:
+        for usage_line, block in parse_command_grammar_blocks(verification.output, r2_source):
+            for candidate in command_candidates_from_block(usage_line, block, "r2:?*", variants_per_block):
+                rows.append(command_row_from_candidate(candidate, verification, r2_source, r2_bin))
+    rows = merge_command_rows(rows)
+    rows, memory_applied, synthetic_memory_rows = apply_command_memories(rows)
+    if args.limit > 0 and len(rows) > args.limit:
+        human_rows = [row for row in rows if row.get("status") == "human-reviewed"]
+        other_rows = [row for row in rows if row.get("status") != "human-reviewed"]
+        rows = sorted(
+            human_rows + other_rows[: max(0, args.limit - len(human_rows))],
+            key=lambda item: safe_id_part(str(item.get("command", ""))),
+        )
+    previous = read_jsonl(COMMANDS_DB_PATH)
+    previous_by_id = rows_by_id(previous)
+    changed = [row for row in rows if previous_by_id.get(str(row.get("id"))) != row]
+    write_jsonl(COMMANDS_DB_PATH, rows)
+    write_jsonl(COMMANDS_TRAINING_PATH, command_training_rows(rows))
+    gaps = [row for row in rows if row.get("status") == "needs-memory"]
+    topics: list[dict[str, Any]] = []
+    knowledge_topics: list[dict[str, Any]] = []
+    if args.memory_limit > 0:
+        knowledge_reserve = max(1, args.memory_limit // 3) if args.memory_limit > 1 else 0
+        gap_topic_limit = max(0, args.memory_limit - knowledge_reserve)
+        topics = ai_command_memory_topics(gaps, args)[:gap_topic_limit]
+        if len(topics) < gap_topic_limit:
+            topics.extend(heuristic_command_memory_topics(gaps, gap_topic_limit - len(topics)))
+        if len(topics) < args.memory_limit:
+            knowledge_topics = knowledge_command_memory_topics(args.memory_limit - len(topics))
+            topics.extend(knowledge_topics)
+        if len(topics) < args.memory_limit:
+            topics.extend(heuristic_command_memory_topics(gaps, args.memory_limit - len(topics)))
+    topics = topics[: args.memory_limit]
+    topic_count, queued_count = queue_command_memory_topics(topics, args.queue_memory)
+    index = {
+        "command_rows": len(rows),
+        "documented_rows": len([row for row in rows if row.get("status") == "documented"]),
+        "human_reviewed_rows": len([row for row in rows if row.get("status") == "human-reviewed"]),
+        "needs_memory_rows": len(gaps),
+        "last_changed_rows": len(changed),
+        "memory_rows_applied": memory_applied,
+        "synthetic_memory_rows": synthetic_memory_rows,
+        "memory_topics": topic_count,
+        "knowledge_memory_topics": len(knowledge_topics),
+        "memory_topics_queued": queued_count,
+        "source_refs": ["r2:?*", "r2:<command>? help"],
+        "ai_mode": args.ai,
+        "updated_at": utc_timestamp(),
+    }
+    COMMANDS_INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    COMMANDS_INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    print(f"agentic commands {len(rows)} rows, {len(changed)} changed, {len(gaps)} need memory")
+    print(f"agentic commands memory applied {memory_applied} accepted memories, {synthetic_memory_rows} synthetic rows")
+    print(f"agentic commands db {repo_path_ref(COMMANDS_DB_PATH)}")
+    print(f"agentic commands training {repo_path_ref(COMMANDS_TRAINING_PATH)}")
+    print(f"agentic commands memory topics {topic_count} written to {repo_path_ref(COMMANDS_MEMORY_TOPICS_PATH)}")
+    if knowledge_topics:
+        print(f"agentic commands knowledge memory topics {len(knowledge_topics)} mined from {repo_path_ref(KNOWLEDGE_PATH)}")
+    if args.queue_memory:
+        print(f"agentic commands queued {queued_count} topics for make memory in {repo_path_ref(MEMORY_TOPICS_PATH)}")
+    for row in rows[: min(8, len(rows))]:
+        print(f"  command {row.get('command')}: {row.get('status')} - {row_message_content(row, 'user')}")
+    return 0
 
 
 def build_help_frontier(r2_bin: Path, r2_source: Path, timeout: int, seen: set[str], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -2138,7 +3469,7 @@ def build_experiment_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen
         if row_id in seen:
             continue
         fixture = str(plan.get("fixture", "-"))
-        if fixture not in ("-", "--") and not Path(fixture_path({"fixture": fixture}, r2_source)).is_file():
+        if fixture not in ("-", "--") and not is_r2_uri_fixture(fixture) and not Path(fixture_path({"fixture": fixture}, r2_source)).is_file():
             continue
         entry = {
             "id": row_id,
@@ -2271,6 +3602,7 @@ def build_autonomous_knowledge(r2_bin: Path, r2_source: Path, timeout: int, args
     section_budget = max(1, args.section_budget)
     builders = [
         ("help", lambda n: build_help_frontier(r2_bin, r2_source, timeout, seen, n)),
+        ("command-grammar", lambda n: build_command_grammar_knowledge(r2_bin, r2_source, timeout, seen, n)),
         ("experiments", lambda n: build_experiment_knowledge(r2_bin, r2_source, timeout, seen, n, args.discover_fixtures)),
         ("source-xrefs", lambda n: (build_source_xref_knowledge(r2_source, seen, n), [])),
         ("r2r-tests", lambda n: build_r2r_test_knowledge(r2_bin, r2_source, timeout, seen, n)),
@@ -2340,6 +3672,21 @@ def build(args: argparse.Namespace) -> int:
         if run_path:
             print(f"knowledge run shard {repo_path_ref(run_path)}")
         print_new_knowledge_rows(accepted_rows, pending_rows)
+        command_memory_limit = int(os.environ.get(
+            "AGENTIC_KNOWLEDGE_COMMAND_MEMORY_LIMIT",
+            os.environ.get("AGENTIC_COMMANDS_MEMORY_LIMIT", "24"),
+        ))
+        if command_memory_limit > 0:
+            knowledge_command_topics = knowledge_command_memory_topics(command_memory_limit)
+            topic_count, queued_count = queue_command_memory_topics(
+                knowledge_command_topics,
+                True,
+                COMMANDS_KNOWLEDGE_TOPICS_PATH,
+            )
+            print(
+                f"knowledge command memory topics {topic_count} written to "
+                f"{repo_path_ref(COMMANDS_KNOWLEDGE_TOPICS_PATH)}, queued {queued_count} for make memory"
+            )
     if not args.dry_run and seeds_checked:
         write_human_tsv(ROOT / "data" / "agentic-review" / "generated-failures.tsv", all_pending)
     return 0 if not all_pending else 1
@@ -2712,6 +4059,19 @@ def main(argv: list[str]) -> int:
     pending_parser.add_argument("--response-log", default=str(HUMAN_RESPONSES_PATH))
     pending_parser.add_argument("--r2-source", default=str(DEFAULT_R2_SOURCE))
     pending_parser.set_defaults(func=pending)
+
+    commands_parser = sub.add_parser("commands", help="build the agentic radare2 command grammar database")
+    commands_parser.add_argument("--r2-bin", default=None)
+    commands_parser.add_argument("--r2-source", default=str(DEFAULT_R2_SOURCE))
+    commands_parser.add_argument("--timeout", type=int, default=20)
+    commands_parser.add_argument("--limit", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_LIMIT", "240")))
+    commands_parser.add_argument("--variants-per-block", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_VARIANTS_PER_BLOCK", "8")))
+    commands_parser.add_argument("--memory-limit", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_MEMORY_LIMIT", "24")))
+    commands_parser.add_argument("--queue-memory", action=argparse.BooleanOptionalAction, default=False)
+    commands_parser.add_argument("--ai", choices=["auto", "off", "required"], default=os.environ.get("AGENTIC_COMMANDS_AI", "auto"))
+    commands_parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL", "gpt-4o"))
+    commands_parser.add_argument("--temperature", type=float, default=float(os.environ.get("AGENTIC_COMMANDS_TEMPERATURE", "0.2")))
+    commands_parser.set_defaults(func=build_agentic_command_database)
 
     propose_parser = sub.add_parser("propose", help="use an OpenAI-compatible model to propose pending rows")
     propose_parser.add_argument("--model", default=os.environ.get("OPENAI_MODEL", "gpt-4o"))

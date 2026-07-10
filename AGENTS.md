@@ -9,8 +9,17 @@ make agentic
 # verify registered executable knowledge
 make agentic-verify
 
+# build command grammar rows and queue command-memory questions
+make agentic-commands
+
 # answer or drop pending human-review rows
 make agentic-pending
+
+# collect human corrections interactively or through JSON batch mode
+make memory
+make agentic-memory
+make agentic-memory-file < answer.json
+make memory-export
 
 # merge all training-ready datasets
 make -C training merge-agentic-dataset
@@ -40,3 +49,7 @@ model:
 
 Keep generated bug leads in `R2BUGS.md` out of training data unless they are
 manually confirmed and converted into a reviewed training row.
+
+Human corrections collected with `make memory` are stored in
+`data/memory/memory.jsonl` and exported to `data/memory/verified.jsonl`. The
+agentic training merge includes that export.

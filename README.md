@@ -15,10 +15,41 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 ## Documentation
 
 * [doc/learn.md](doc/learn.md) -> discover and register new agentic knowledge.
+* [doc/commands.md](doc/commands.md) -> build the radare2 command grammar dataset and memory queue.
 * [doc/review.md](doc/review.md) -> verify knowledge and handle human review.
+* [doc/memory.md](doc/memory.md) -> collect human corrections into reusable training memory.
 * [doc/bugs.md](doc/bugs.md) -> understand `R2BUGS.md` and generated source-audit leads.
 * [doc/train.md](doc/train.md) -> merge datasets, choose a model, and train.
 * [AGENTS.md](AGENTS.md) -> minimal command cheat sheet for agents.
+
+## Agentic Commands
+
+Use `make agentic-commands` to build `data/agentic-commands/` from radare2
+command help, `?*` command-line grammar, and optional OpenAI-compatible memory
+question proposals. The target also queues weak command explanations into
+`data/memory/topics.jsonl`, so `make memory` can collect human corrections.
+
+```sh
+make agentic-commands
+make memory
+```
+
+## Human memory
+
+Use `make memory` when an agent needs the human to clarify a topic, correct a
+bad answer, or add domain knowledge that should survive into training. The
+workflow stores source memory in `data/memory/memory.jsonl` and exports chat
+training rows to `data/memory/verified.jsonl`. The training merge target refreshes
+that export before concatenating datasets.
+
+```sh
+make memory
+make agentic-memory
+make agentic-memory MEMORY_FORMAT=json > question.json
+make agentic-memory-file < answer.json
+make memory-add TOPIC="radare2 ESIL stepping" QUESTION="How should repeat prefixes compose with aes?" TAGS="radare2,esil"
+make memory-export
+```
 
 ## Agentic generation
 

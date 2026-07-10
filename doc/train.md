@@ -1,10 +1,12 @@
 # Training
 
 Build one training JSONL from the classic dataset, verified companion datasets,
-and the agentic knowledge aggregate:
+the agentic knowledge aggregate, and exported human memory rows:
 
 ```sh
 make agentic-verify
+make agentic-commands
+make memory-export
 make -C training merge-agentic-dataset
 ```
 
@@ -24,6 +26,8 @@ cat \
   data/r2js/verified.jsonl \
   data/reasoning-long/verified.jsonl \
   data/agentic-knowledge/knowledge.jsonl \
+  data/agentic-commands/verified.jsonl \
+  data/memory/verified.jsonl \
   > data/training/radare2_all_agentic_train.jsonl
 ```
 

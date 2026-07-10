@@ -85,13 +85,13 @@ make -C training deps
 make -C training compile-dataset
 ```
 
-To merge the classic, verified, and agentic datasets instead:
+To merge the classic, verified, agentic, command, and memory datasets instead:
 
 ```bash
 make -C training merge-agentic-dataset
 ```
 
-`merge-agentic-dataset` writes `../data/training/radare2_all_agentic_train.jsonl`.
+`merge-agentic-dataset` refreshes `../data/memory/verified.jsonl` and writes `../data/training/radare2_all_agentic_train.jsonl`.
 
 `compile-dataset` runs the dataset generation scripts from the parent directory:
 - `parse_usage.py` - Parse radare2 command documentation
@@ -112,6 +112,7 @@ make -C training train-minicpm5
 ### 4. Individual Targets
 ```bash
 make -C training help                 # Show all available targets
+make memory-export                       # Optional; merge-agentic-dataset refreshes this too
 make -C training merge-agentic-dataset # Build merged training JSONL
 make -C training clean                # Clean up environment and outputs
 make -C training chat MODEL=radare2-smollm-finetuned.gguf
@@ -123,6 +124,9 @@ make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
 The classic training target uses `../data/radare2/radare2_train.jsonl`. The agentic targets use `../data/training/radare2_all_agentic_train.jsonl`. This dataset contains:
 - Questions about radare2 usage
 - Corresponding radare2 commands as answers
+- Verified agentic knowledge and command workflows
+- Command grammar rows from `data/agentic-commands/verified.jsonl`
+- Human memory corrections from `data/memory/verified.jsonl`
 - Conversational format with system prompts
 
 ## Model Export

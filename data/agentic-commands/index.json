@@ -1,0 +1,18 @@
+{
+  "ai_mode": "off",
+  "command_rows": 240,
+  "documented_rows": 45,
+  "human_reviewed_rows": 10,
+  "knowledge_memory_topics": 24,
+  "last_changed_rows": 0,
+  "memory_rows_applied": 9,
+  "memory_topics": 24,
+  "memory_topics_queued": 24,
+  "needs_memory_rows": 185,
+  "source_refs": [
+    "r2:?*",
+    "r2:<command>? help"
+  ],
+  "synthetic_memory_rows": 1,
+  "updated_at": "2026-07-10T16:07:37Z"
+}
