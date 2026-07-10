@@ -3,22 +3,33 @@
 Basic workflow for this repository:
 
 ```sh
+# install the agent-facing CLI into /usr/local/bin
+make install
+r2ai-model status
+
 # discover/register new agentic knowledge
 make agentic
+r2ai-model learn
 
 # verify registered executable knowledge
 make agentic-verify
+r2ai-model verify
 
 # build command grammar rows and queue command-memory questions
 make agentic-commands
+r2ai-model commands
 
 # answer or drop pending human-review rows
 make agentic-pending
+r2ai-model pending
 
 # collect human corrections interactively or through JSON batch mode
 make memory
 make agentic-memory
 make agentic-memory-file < answer.json
+r2ai-model play
+r2ai-model next --format json
+r2ai-model answer < answer.json
 make memory-export
 
 # merge all training-ready datasets

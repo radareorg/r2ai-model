@@ -22,6 +22,31 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 * [doc/train.md](doc/train.md) -> merge datasets, choose a model, and train.
 * [AGENTS.md](AGENTS.md) -> minimal command cheat sheet for agents.
 
+## Installable CLI
+
+Install the checkout front door into `/usr/local/bin`:
+
+```sh
+sudo make install
+```
+
+The installed `r2ai-model` command is a symlink to this checkout's executable,
+so learning commands update the knowledge base in this source directory. Running
+`r2ai-model` with no arguments prints usage examples. It exposes the same
+agentic learning actions as the Makefile, plus a batch protocol for
+agents that collect human answers out of band:
+
+```sh
+r2ai-model commands
+r2ai-model learn
+r2ai-model verify
+r2ai-model status
+r2ai-model play
+r2ai-model next --format json > question.json
+r2ai-model answer < answer.json
+r2ai-model answer --file answer.json
+```
+
 ## Agentic Commands
 
 Use `make agentic-commands` to build `data/agentic-commands/` from radare2
@@ -49,6 +74,8 @@ make agentic-memory MEMORY_FORMAT=json > question.json
 make agentic-memory-file < answer.json
 make memory-add TOPIC="radare2 ESIL stepping" QUESTION="How should repeat prefixes compose with aes?" TAGS="radare2,esil"
 make memory-export
+r2ai-model next --format json
+r2ai-model answer < answer.json
 ```
 
 ## Agentic generation

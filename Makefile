@@ -1,5 +1,7 @@
 TSVFILE=data/radare2/pending/claude-numbers2.tsv
 # TSVFILE=data/radare2/pending/r2gpt-advent.tsv
+PREFIX?=/usr/local
+BINDIR?=$(PREFIX)/bin
 SOURCE?=terminal
 QUESTION?=
 TAGS?=
@@ -7,8 +9,19 @@ AGENTIC_COMMANDS_ARGS?=
 MEMORY_FORMAT?=text
 MEMORY_FILE?=-
 
+.PHONY: all install uninstall agentic agentic-verify agentic-pending agentic-commands agentic-r2cmd agentic-r2js agentic-reasoning memory agentic-memory agentic-memory-file memory-list memory-export memory-add memory-remember
+
 all:
 	./review-pending.sh "${TSVFILE}"
+
+install:
+	@mkdir -p "$(DESTDIR)$(BINDIR)"
+	@ln -sfn "$(CURDIR)/r2ai-model" "$(DESTDIR)$(BINDIR)/r2ai-model"
+	@echo "installed symlink $(DESTDIR)$(BINDIR)/r2ai-model -> $(CURDIR)/r2ai-model"
+
+uninstall:
+	@rm -f "$(DESTDIR)$(BINDIR)/r2ai-model"
+	@echo "removed $(DESTDIR)$(BINDIR)/r2ai-model"
 
 agentic:
 	@./agentic-dataset.py build --skip-seeds
