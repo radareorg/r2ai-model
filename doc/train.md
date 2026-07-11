@@ -22,6 +22,7 @@ Equivalent manual merge:
 mkdir -p data/training
 python3 training/merge_datasets.py \
   --output data/training/radare2_all_agentic_train.jsonl \
+  data/radare2/function_calling_r2cmd_dataset.jsonl \
   data/radare2/radare2_train.jsonl \
   data/radare2-agentic/verified.jsonl \
   data/r2js/verified.jsonl \
@@ -31,8 +32,9 @@ python3 training/merge_datasets.py \
   data/memory/verified.jsonl
 ```
 
-The merger validates each conversation and writes only the uniform `messages`
-field used by training. Source metadata remains in the individual datasets.
+The merger validates each conversation and writes the uniform `messages` and
+`tools` fields used by training. Source metadata remains in the individual
+datasets.
 
 Choose the model in a training config:
 
@@ -53,6 +55,9 @@ Conversations are rendered with the selected tokenizer's native chat template;
 the tokenizer must therefore provide `chat_template` metadata.
 Labels are masked to `-100` for system, user, and assistant-prompt tokens, so
 loss is computed only on assistant response bodies and their end-of-turn tokens.
+Function-calling rows pass their `tools` definitions to the same native chat
+template. Assistant tool calls and final assistant responses are supervised;
+`tool` result messages remain masked context.
 
 Useful model choices:
 

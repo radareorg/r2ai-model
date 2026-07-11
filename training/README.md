@@ -71,6 +71,8 @@ Edit `config.yaml` to customize:
   template and require a tokenizer with `chat_template` metadata
 - **Loss masking**: System, user, and assistant-prompt tokens provide context
   but only assistant response and end-of-turn tokens contribute to loss
+- **Tools**: Function definitions, assistant tool calls, and tool results are
+  preserved; tool calls are supervised while tool results remain masked context
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning

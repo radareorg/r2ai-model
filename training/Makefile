@@ -48,14 +48,15 @@ compile-dataset:
 	cd .. && $(VPYTHON) r2cmd.py
 	@echo "Dataset compilation completed."
 
-# Merge all training-ready datasets, including agentic knowledge, command knowledge, and human memories.
+# Merge all training-ready chat, tool-calling, agentic, command, and memory datasets.
 merge-agentic-dataset:
-	@echo "Merging classic, verified, agentic, command, and memory datasets into $(MERGED_DATASET)..."
+	@echo "Merging chat, tool-calling, agentic, command, and memory datasets into $(MERGED_DATASET)..."
 	mkdir -p ../data/training
 	mkdir -p ../data/agentic-commands
 	touch ../data/agentic-commands/verified.jsonl
 	cd .. && ./memory.py export-training
 	python3 merge_datasets.py --output $(MERGED_DATASET) \
+		../data/radare2/function_calling_r2cmd_dataset.jsonl \
 		../data/radare2/radare2_train.jsonl \
 		../data/radare2-agentic/verified.jsonl \
 		../data/r2js/verified.jsonl \

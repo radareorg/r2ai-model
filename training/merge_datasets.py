@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SUPPORTED_ROLES = {"system", "user", "assistant"}
+SUPPORTED_ROLES = {"system", "user", "assistant", "tool"}
 
 
 def training_row(row: Any, source: Path, lineno: int) -> dict[str, Any]:
@@ -26,12 +26,28 @@ def training_row(row: Any, source: Path, lineno: int) -> dict[str, Any]:
             raise ValueError(f"{location}: expected a JSON object")
         role = message.get("role")
         content = message.get("content")
+        tool_calls = message.get("tool_calls") or []
         if role not in SUPPORTED_ROLES:
             raise ValueError(f"{location}: unsupported role {role!r}")
-        if not isinstance(content, str) or not content.strip():
+        if not isinstance(tool_calls, list):
+            raise ValueError(f"{location}: tool_calls must be a list")
+        has_tool_call = role == "assistant" and bool(tool_calls)
+        if not isinstance(content, str) or (
+            not content.strip() and not has_tool_call
+        ):
             raise ValueError(f"{location}: content must be a non-empty string")
-        normalized.append({"role": role, "content": content})
-    return {"messages": normalized}
+        normalized.append({
+            "role": role,
+            "content": content,
+            "name": str(message.get("name") or ""),
+            "tool_call_id": str(message.get("tool_call_id") or ""),
+            "tool_calls": tool_calls,
+        })
+
+    tools = row.get("tools") or []
+    if not isinstance(tools, list):
+        raise ValueError(f"{source}:{lineno}: tools must be a list")
+    return {"messages": normalized, "tools": tools}
 
 
 def read_training_rows(path: Path) -> Iterator[dict[str, Any]]:

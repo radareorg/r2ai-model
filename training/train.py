@@ -7,6 +7,7 @@ and exports it to GGUF format (Linux/NVIDIA) or MLX format (Mac).
 """
 
 import argparse
+import copy
 import json
 import os
 import platform
@@ -29,7 +30,30 @@ from transformers import (
 )
 
 DEFAULT_MAX_LENGTH = 2048
-PREPROCESSING_VERSION = 3
+PREPROCESSING_VERSION = 4
+
+
+def common_prefix_length(left: str, right: str) -> int:
+    length = 0
+    while length < min(len(left), len(right)) and left[length] == right[length]:
+        length += 1
+    return length
+
+
+def token_aligned_prefix_length(tokenizer, text: str, character_limit: int) -> int:
+    encoded = tokenizer(
+        text,
+        add_special_tokens=False,
+        return_offsets_mapping=True,
+    )
+    return max(
+        (
+            end
+            for start, end in encoded["offset_mapping"]
+            if end > start and end <= character_limit
+        ),
+        default=0,
+    )
 
 
 def load_config(config_path: str = "config.yaml"):
@@ -174,47 +198,102 @@ def setup_model_and_tokenizer(config):
     return model, tokenizer
 
 
-def tokenize_chat(tokenizer, messages, max_length: int) -> dict[str, list[int]]:
+def tokenize_chat(
+    tokenizer,
+    messages,
+    max_length: int,
+    tools=None,
+) -> dict[str, list[int]]:
     """Tokenize a conversation and supervise only assistant turn bodies."""
-    input_ids = tokenizer.apply_chat_template(
+    template_kwargs = {"tools": tools} if tools else {}
+    rendered = tokenizer.apply_chat_template(
         messages,
-        tokenize=True,
+        tokenize=False,
         add_generation_prompt=False,
-        truncation=True,
-        max_length=max_length,
+        **template_kwargs,
     )
-    labels = [-100] * len(input_ids)
-    assistant_turns = 0
-
+    spans = []
     for index, message in enumerate(messages):
         if message.get("role") != "assistant":
             continue
-        assistant_turns += 1
-        prompt_ids = tokenizer.apply_chat_template(
-            messages[:index],
-            tokenize=True,
-            add_generation_prompt=True,
-            truncation=True,
-            max_length=max_length,
-        )
-        through_turn_ids = tokenizer.apply_chat_template(
-            messages[:index + 1],
-            tokenize=True,
-            add_generation_prompt=False,
-            truncation=True,
-            max_length=max_length,
-        )
-        if input_ids[:len(through_turn_ids)] != through_turn_ids:
-            raise ValueError("Chat template output is not prefix-stable across turns")
-        if through_turn_ids[:len(prompt_ids)] != prompt_ids:
-            raise ValueError(
-                "Chat template generation prompt does not align with assistant content"
-            )
-        for position in range(len(prompt_ids), len(through_turn_ids)):
-            labels[position] = input_ids[position]
 
-    if assistant_turns == 0:
+        without_assistant = copy.deepcopy(messages)
+        without_assistant[index]["role"] = "__masked_assistant__"
+        omitted = tokenizer.apply_chat_template(
+            without_assistant,
+            tokenize=False,
+            add_generation_prompt=False,
+            **template_kwargs,
+        )
+        prefix = common_prefix_length(rendered, omitted)
+        suffix = 0
+        suffix_limit = min(len(rendered), len(omitted))
+        while suffix < suffix_limit:
+            if rendered[-1 - suffix] != omitted[-1 - suffix]:
+                break
+            suffix += 1
+
+        context = messages[:index]
+        context_text = tokenizer.apply_chat_template(
+            context,
+            tokenize=False,
+            add_generation_prompt=False,
+            **template_kwargs,
+        )
+        generation_prompt = tokenizer.apply_chat_template(
+            messages[:index],
+            tokenize=False,
+            add_generation_prompt=True,
+            **template_kwargs,
+        )
+        if not generation_prompt.startswith(context_text):
+            raise ValueError("Chat template generation prompt is not append-only")
+        prompt_suffix = generation_prompt[len(context_text):]
+
+        removed_length = len(rendered) - len(omitted)
+        earliest = max(0, len(omitted) - suffix)
+        candidates = []
+        for candidate_start in range(earliest, prefix + 1):
+            candidate_end = candidate_start + removed_length
+            if rendered[:candidate_start] + rendered[candidate_end:] != omitted:
+                continue
+            assistant_block = rendered[candidate_start:candidate_end]
+            raw_prompt_length = common_prefix_length(prompt_suffix, assistant_block)
+            prompt_length = token_aligned_prefix_length(
+                tokenizer,
+                assistant_block,
+                raw_prompt_length,
+            )
+            candidates.append((raw_prompt_length, prompt_length, candidate_start))
+        if not candidates:
+            raise ValueError("Chat template cannot isolate an assistant turn")
+        _, prompt_length, start = max(
+            candidates,
+            key=lambda item: (item[0], -item[2]),
+        )
+        end = start + removed_length
+        spans.append((start + prompt_length, end))
+
+    if not spans:
         raise ValueError("Conversation has no assistant turn")
+
+    encoded = tokenizer(
+        rendered,
+        add_special_tokens=False,
+        truncation=True,
+        max_length=max_length,
+        return_offsets_mapping=True,
+    )
+    input_ids = encoded["input_ids"]
+    labels = [-100] * len(input_ids)
+    for position, (token_start, token_end) in enumerate(encoded["offset_mapping"]):
+        if token_end <= token_start:
+            continue
+        if any(
+            token_start >= span_start and token_end <= span_end
+            for span_start, span_end in spans
+        ):
+            labels[position] = input_ids[position]
     if all(label == -100 for label in labels):
         raise ValueError(
             "No assistant tokens remain after truncation; increase dataset.max_length"
@@ -240,9 +319,15 @@ def load_and_prepare_dataset(config, tokenizer):
     dataset = load_dataset('json', data_files=str(dataset_path))
 
     def tokenize_function(examples):
+        tools = examples.get("tools")
         rows = [
-            tokenize_chat(tokenizer, messages, max_length)
-            for messages in examples['messages']
+            tokenize_chat(
+                tokenizer,
+                messages,
+                max_length,
+                tools[index] if tools else None,
+            )
+            for index, messages in enumerate(examples['messages'])
         ]
         return {
             name: [row[name] for row in rows]

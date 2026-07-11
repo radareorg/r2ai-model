@@ -12,11 +12,12 @@ change after running the agentic, memory, review, or merge commands.
 
 ## Active training datasets
 
-`training/Makefile` builds the agentic training dataset by concatenating these
-seven files:
+`training/Makefile` builds the agentic training dataset from these eight
+files:
 
 | Dataset | Current rows | Purpose |
 | --- | ---: | --- |
+| `data/radare2/function_calling_r2cmd_dataset.jsonl` | 363 | Native-template r2cmd tool-calling conversations |
 | `data/radare2/radare2_train.jsonl` | 363 | Classic question-to-radare2-command examples |
 | `data/radare2-agentic/verified.jsonl` | 10 | Locally executed and checked command examples |
 | `data/r2js/verified.jsonl` | 5 | Embedded JavaScript/r2js examples |
@@ -24,11 +25,11 @@ seven files:
 | `data/agentic-knowledge/knowledge.jsonl` | 349 | Deduplicated source-, documentation-, test-, and experiment-derived knowledge |
 | `data/agentic-commands/verified.jsonl` | 240 | Training export of command grammar explanations |
 | `data/memory/verified.jsonl` | 9 | Exported human corrections |
-| **Current source total** | **980** | Expected result of a fresh merge |
+| **Current source total** | **1,343** | Expected result of a fresh merge |
 
 The merge validates every conversation and writes a uniform training-only row
-containing `messages`. It does not shuffle, split, or deduplicate across the
-seven sources. Rebuild it with:
+containing `messages` and optional `tools`. It does not shuffle, split, or
+deduplicate across the eight sources. Rebuild it with:
 
 ```sh
 make -C training merge-agentic-dataset
@@ -36,10 +37,11 @@ make -C training merge-agentic-dataset
 
 Source identifiers, provenance, and verification details remain in the source
 datasets. They are intentionally omitted from the merged artifact because the
-training loader consumes only `messages`, and heterogeneous verification check
-values cannot be represented by one inferred Arrow schema.
+training loader consumes only `messages` and optional `tools`, and
+heterogeneous verification check values cannot be represented by one inferred
+Arrow schema.
 
-The current generated artifact contains all 980 rows from the seven sources.
+The current generated artifact contains all 1,343 rows from the eight sources.
 The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
@@ -50,6 +52,9 @@ avoiding duplicated special tokens.
 Training labels use `-100` outside assistant response spans. System prompts,
 user questions, and model-specific assistant prompt markers remain in
 `input_ids` as context but do not contribute directly to the loss.
+Function-calling rows also retain top-level tool definitions, assistant
+`tool_calls`, and `tool` result messages. Assistant tool calls and final
+responses are supervised; tool results remain masked context.
 
 There is no explicit train/validation/test split. `training/config.yaml`
 currently points to the classic 363-row dataset, while
@@ -101,13 +106,14 @@ variants.
   `breakdown` columns. Two records do not have usable Q/A fields.
 * `radare2_train.jsonl` is the resulting set of 363 valid three-message
   conversations.
-* `function_calling_r2cmd_dataset.jsonl` contains 363 tool-calling conversions.
-  Each row has a `messages` array and an `r2cmd` definition in `tools`. Its
-  conversation contains system, user, assistant tool call, tool result, and
-  final assistant messages.
+* `function_calling_r2cmd_dataset.jsonl` contains 363 tool-calling conversions
+  and is included in the active merge. Each row has a `messages` array and an
+  `r2cmd` definition in `tools`. Its conversation contains system, user,
+  assistant tool call, tool result, and final assistant messages.
 * `converted_r2cmd_dataset_good_for_mistral.jsonl` contains 3,778 rows in the
-  same general function-calling style. It is a legacy prebuilt artifact and is
-  not referenced by the current generation scripts.
+  same general function-calling style. It remains a legacy prebuilt artifact
+  outside the active merge, but the training loader now supports its structure
+  when selected explicitly.
 
 The classic generation flow is:
 
@@ -300,9 +306,9 @@ The r2frida data is not included in the current training merge.
 ## Merged training output
 
 `data/training/radare2_all_agentic_train.jsonl` is the assembled, uniform chat
-dataset. Each row contains only `messages`. It is generated from the seven
-active sources listed at the top of this document and should not be edited
-manually.
+dataset. Each row contains `messages` and a `tools` list, which is empty for
+ordinary chat rows. It is generated from the eight active sources listed at the
+top of this document and should not be edited manually.
 
 ## Files that are not datasets
 
