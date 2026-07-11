@@ -44,10 +44,12 @@ The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
 length until collation.
-At preprocessing time, the selected tokenizer's native chat template adds the
-model-specific role markers, separators, and end-of-turn tokens. Those rendered
-strings are tokenized with `add_special_tokens=False` to avoid duplicating
-template-provided special tokens.
+At preprocessing time, `apply_chat_template(tokenize=True)` adds and tokenizes
+the model-specific role markers, separators, and end-of-turn tokens in one step,
+avoiding duplicated special tokens.
+Training labels use `-100` outside assistant response spans. System prompts,
+user questions, and model-specific assistant prompt markers remain in
+`input_ids` as context but do not contribute directly to the loss.
 
 There is no explicit train/validation/test split. `training/config.yaml`
 currently points to the classic 363-row dataset, while

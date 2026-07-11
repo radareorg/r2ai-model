@@ -69,6 +69,8 @@ Edit `config.yaml` to customize:
   dynamic padding rather than padding every row to that limit
 - **Chat format**: Conversations use the selected tokenizer's native chat
   template and require a tokenizer with `chat_template` metadata
+- **Loss masking**: System, user, and assistant-prompt tokens provide context
+  but only assistant response and end-of-turn tokens contribute to loss
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning

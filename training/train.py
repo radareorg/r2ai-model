@@ -23,13 +23,13 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    DataCollatorForLanguageModeling,
+    DataCollatorForSeq2Seq,
     Trainer,
     TrainingArguments,
 )
 
 DEFAULT_MAX_LENGTH = 2048
-PREPROCESSING_VERSION = 2
+PREPROCESSING_VERSION = 3
 
 
 def load_config(config_path: str = "config.yaml"):
@@ -174,18 +174,56 @@ def setup_model_and_tokenizer(config):
     return model, tokenizer
 
 
-def render_chat(tokenizer, messages) -> str:
-    """Render one conversation with the selected model's native template."""
-    if not getattr(tokenizer, "chat_template", None):
-        raise ValueError(
-            "The selected tokenizer does not define a chat template. "
-            "Choose an instruction tokenizer with chat_template support."
-        )
-    return tokenizer.apply_chat_template(
+def tokenize_chat(tokenizer, messages, max_length: int) -> dict[str, list[int]]:
+    """Tokenize a conversation and supervise only assistant turn bodies."""
+    input_ids = tokenizer.apply_chat_template(
         messages,
-        tokenize=False,
+        tokenize=True,
         add_generation_prompt=False,
+        truncation=True,
+        max_length=max_length,
     )
+    labels = [-100] * len(input_ids)
+    assistant_turns = 0
+
+    for index, message in enumerate(messages):
+        if message.get("role") != "assistant":
+            continue
+        assistant_turns += 1
+        prompt_ids = tokenizer.apply_chat_template(
+            messages[:index],
+            tokenize=True,
+            add_generation_prompt=True,
+            truncation=True,
+            max_length=max_length,
+        )
+        through_turn_ids = tokenizer.apply_chat_template(
+            messages[:index + 1],
+            tokenize=True,
+            add_generation_prompt=False,
+            truncation=True,
+            max_length=max_length,
+        )
+        if input_ids[:len(through_turn_ids)] != through_turn_ids:
+            raise ValueError("Chat template output is not prefix-stable across turns")
+        if through_turn_ids[:len(prompt_ids)] != prompt_ids:
+            raise ValueError(
+                "Chat template generation prompt does not align with assistant content"
+            )
+        for position in range(len(prompt_ids), len(through_turn_ids)):
+            labels[position] = input_ids[position]
+
+    if assistant_turns == 0:
+        raise ValueError("Conversation has no assistant turn")
+    if all(label == -100 for label in labels):
+        raise ValueError(
+            "No assistant tokens remain after truncation; increase dataset.max_length"
+        )
+    return {
+        "input_ids": input_ids,
+        "attention_mask": [1] * len(input_ids),
+        "labels": labels,
+    }
 
 
 def load_and_prepare_dataset(config, tokenizer):
@@ -202,14 +240,14 @@ def load_and_prepare_dataset(config, tokenizer):
     dataset = load_dataset('json', data_files=str(dataset_path))
 
     def tokenize_function(examples):
-        texts = [render_chat(tokenizer, messages) for messages in examples['messages']]
-        return tokenizer(
-            texts,
-            truncation=True,
-            padding=False,
-            max_length=max_length,
-            add_special_tokens=False,
-        )
+        rows = [
+            tokenize_chat(tokenizer, messages, max_length)
+            for messages in examples['messages']
+        ]
+        return {
+            name: [row[name] for row in rows]
+            for name in ("input_ids", "attention_mask", "labels")
+        }
 
     # Split dataset
     test_size = config['dataset']['test_split']
@@ -246,9 +284,10 @@ def train_model(config, model, tokenizer, dataset):
         dataloader_pin_memory=False,
     )
 
-    data_collator = DataCollatorForLanguageModeling(
+    data_collator = DataCollatorForSeq2Seq(
         tokenizer=tokenizer,
-        mlm=False,
+        padding=True,
+        label_pad_token_id=-100,
     )
 
     trainer = Trainer(

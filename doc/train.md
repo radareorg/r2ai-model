@@ -51,6 +51,8 @@ length and are padded dynamically by the batch collator, so short examples do
 not pay the memory cost of the longest sequence in the full dataset.
 Conversations are rendered with the selected tokenizer's native chat template;
 the tokenizer must therefore provide `chat_template` metadata.
+Labels are masked to `-100` for system, user, and assistant-prompt tokens, so
+loss is computed only on assistant response bodies and their end-of-turn tokens.
 
 Useful model choices:
 
