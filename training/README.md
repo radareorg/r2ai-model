@@ -67,6 +67,8 @@ Edit `config.yaml` to customize:
 - **Training**: Adjust epochs, batch size, learning rate, etc.
 - **Dataset context**: Adjust `dataset.max_length` (default 2048); batches use
   dynamic padding rather than padding every row to that limit
+- **Chat format**: Conversations use the selected tokenizer's native chat
+  template and require a tokenizer with `chat_template` metadata
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning

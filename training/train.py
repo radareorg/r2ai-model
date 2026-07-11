@@ -29,6 +29,7 @@ from transformers import (
 )
 
 DEFAULT_MAX_LENGTH = 2048
+PREPROCESSING_VERSION = 2
 
 
 def load_config(config_path: str = "config.yaml"):
@@ -55,6 +56,7 @@ def _build_training_metadata(config, dataset_path: Path, final_model_path: Path)
     """Create a metadata snapshot to detect stale training artifacts."""
     dataset_stat = dataset_path.stat()
     relevant = {
+        "preprocessing_version": PREPROCESSING_VERSION,
         "model": config.get("model"),
         "dataset": {
             "path": str(dataset_path),
@@ -171,6 +173,21 @@ def setup_model_and_tokenizer(config):
 
     return model, tokenizer
 
+
+def render_chat(tokenizer, messages) -> str:
+    """Render one conversation with the selected model's native template."""
+    if not getattr(tokenizer, "chat_template", None):
+        raise ValueError(
+            "The selected tokenizer does not define a chat template. "
+            "Choose an instruction tokenizer with chat_template support."
+        )
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+
+
 def load_and_prepare_dataset(config, tokenizer):
     """Load and prepare the dataset."""
     dataset_path = Path(config['dataset']['path'])
@@ -185,22 +202,14 @@ def load_and_prepare_dataset(config, tokenizer):
     dataset = load_dataset('json', data_files=str(dataset_path))
 
     def tokenize_function(examples):
-        # For conversational format, we need to handle messages
-        texts = []
-        for messages in examples['messages']:
-            conversation = ""
-            for msg in messages:
-                role = msg['role']
-                content = msg['content']
-                if role == 'system':
-                    conversation += f"System: {content}\n"
-                elif role == 'user':
-                    conversation += f"User: {content}\n"
-                elif role == 'assistant':
-                    conversation += f"Assistant: {content}\n"
-            texts.append(conversation)
-
-        return tokenizer(texts, truncation=True, padding=False, max_length=max_length)
+        texts = [render_chat(tokenizer, messages) for messages in examples['messages']]
+        return tokenizer(
+            texts,
+            truncation=True,
+            padding=False,
+            max_length=max_length,
+            add_special_tokens=False,
+        )
 
     # Split dataset
     test_size = config['dataset']['test_split']
@@ -373,7 +382,7 @@ def main():
         reuse_reason = "No configuration or dataset changes detected"
         metadata = dict(cached_metadata)
         final_model_path = Path(metadata['final_model_path'])
-    elif _final_model_is_complete(final_model_dir):
+    elif cached_metadata is None and _final_model_is_complete(final_model_dir):
         model_mtime = _latest_mtime_in_directory(final_model_dir)
         if model_mtime and model_mtime >= current_metadata['dataset_mtime']:
             reuse_trained_model = True

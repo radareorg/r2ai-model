@@ -41,9 +41,13 @@ values cannot be represented by one inferred Arrow schema.
 
 The current generated artifact contains all 980 rows from the seven sources.
 The active training configs use a 2,048-token limit, which contains the current
-longest row (1,823 tokens with the local Qwen tokenizer) without truncation.
+longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
 length until collation.
+At preprocessing time, the selected tokenizer's native chat template adds the
+model-specific role markers, separators, and end-of-turn tokens. Those rendered
+strings are tokenized with `add_special_tokens=False` to avoid duplicating
+template-provided special tokens.
 
 There is no explicit train/validation/test split. `training/config.yaml`
 currently points to the classic 363-row dataset, while
