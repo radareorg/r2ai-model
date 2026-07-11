@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""Command-line interface for r2ai-model agentic learning workflows."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+ROOT_MARKERS = ("memory.py", "agentic-dataset.py")
+MEMORY_TOPICS_PATH = Path("data/memory/topics.jsonl")
+MEMORY_PATH = Path("data/memory/memory.jsonl")
+MEMORY_TRAINING_PATH = Path("data/memory/verified.jsonl")
+COMMANDS_DB_PATH = Path("data/agentic-commands/commands.jsonl")
+COMMANDS_TRAINING_PATH = Path("data/agentic-commands/verified.jsonl")
+KNOWLEDGE_PATH = Path("data/agentic-knowledge/knowledge.jsonl")
+TRAINING_MERGE_PATH = Path("data/training/radare2_all_agentic_train.jsonl")
+AGENTIC_PENDING_PATHS = (
+    Path("data/radare2-agentic/pending-human.jsonl"),
+    Path("data/r2js/pending-human.jsonl"),
+    Path("data/reasoning-long/pending-human.jsonl"),
+    Path("data/agentic-knowledge/pending-human.jsonl"),
+)
+
+EXAMPLES = """
+Examples:
+  r2ai-model
+      Show this help page with common workflows.
+
+  r2ai-model status
+      Show queue and dataset counts from the source checkout.
+
+  r2ai-model play
+      Enter the interactive human clarification loop.
+
+  r2ai-model next --format json > question.json
+      Print the next prompt and answer schema for a batch agent.
+
+  r2ai-model answer < answer.json
+  r2ai-model answer --file answer.json
+      Submit one JSON answer or a list of JSON answers.
+
+  r2ai-model commands
+      Build command grammar rows and queue command-memory questions.
+
+  r2ai-model learn
+      Discover and register new agentic knowledge in this checkout.
+
+  r2ai-model verify
+      Verify executable knowledge rows.
+
+  r2ai-model train
+      Install dependencies, rebuild the merged dataset, fine-tune, and export GGUF.
+
+  r2ai-model chat
+      Import the default trained GGUF into Ollama and start an interactive chat.
+""".strip()
+
+
+def find_repo_root(start: Path) -> Path | None:
+    try:
+        current = start.expanduser().resolve()
+    except OSError:
+        current = start.expanduser().absolute()
+    if current.is_file():
+        current = current.parent
+    for candidate in (current, *current.parents):
+        if all((candidate / marker).is_file() for marker in ROOT_MARKERS):
+            return candidate
+    return None
+
+
+def resolve_root() -> Path:
+    candidates: list[Path] = [Path(__file__)]
+    if os.environ.get("R2AI_MODEL_ROOT"):
+        candidates.append(Path(os.environ["R2AI_MODEL_ROOT"]))
+    candidates.append(Path.cwd())
+    for candidate in candidates:
+        root = find_repo_root(candidate)
+        if root:
+            return root
+    raise SystemExit(
+        "Cannot locate r2ai-model checkout. Set R2AI_MODEL_ROOT=/path/to/r2ai-model."
+    )
+
+
+ROOT = resolve_root()
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    full_path = ROOT / path
+    if not full_path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with full_path.open("r", encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise SystemExit(f"invalid JSONL in {path}:{lineno}") from exc
+            if isinstance(item, dict):
+                rows.append(item)
+    return rows
+
+
+def passthrough_args(items: list[str]) -> list[str]:
+    return items[1:] if items and items[0] == "--" else items
+
+
+def run_python(script: str, args: list[str]) -> int:
+    return subprocess.call([sys.executable, str(ROOT / script), *args], cwd=ROOT)
+
+
+def run_make(args: list[str]) -> int:
+    target_args = passthrough_args(args)
+    return subprocess.call(["make", *target_args], cwd=ROOT)
+
+
+def memory_topics() -> list[dict[str, Any]]:
+    return read_jsonl(MEMORY_TOPICS_PATH)
+
+
+def pending_memory_topics() -> list[dict[str, Any]]:
+    return [row for row in memory_topics() if row.get("status") == "pending"]
+
+
+def memory_answer_template(topic: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": topic.get("id", ""),
+        "highlight": "one sentence with the corrected or clarified fact",
+        "details": (
+            "full explanation, examples, commands, caveats, and any context "
+            "the model must learn"
+        ),
+        "tags": topic.get("tags") or ["radare2", "memory"],
+    }
+
+
+def next_payload() -> dict[str, Any]:
+    pending = pending_memory_topics()
+    if not pending:
+        return {"pending_count": 0, "status": "empty"}
+    current = pending[0]
+    template = memory_answer_template(current)
+    return {
+        "status": "pending",
+        "id": current.get("id", ""),
+        "pending_count": len(pending),
+        "topic": current.get("topic", ""),
+        "question": current.get("question") or current.get("topic") or "",
+        "tags": current.get("tags") or [],
+        "source": current.get("source", {}),
+        "answer_template": template,
+        "answer_format": template,
+        "submit": {
+            "stdin": "r2ai-model answer < answer.json",
+            "file": "r2ai-model answer --file answer.json",
+        },
+    }
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    payload = next_payload()
+    if args.format == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if payload.get("status") == "empty":
+        print("no pending memory topics")
+        return 0
+    tags = ",".join(payload.get("tags") or [])
+    print("r2ai-model prompt")
+    print(f"Topic: {payload.get('topic')}")
+    print(f"Topic id: {payload.get('id')}")
+    print(f"Pending: {payload.get('pending_count')}")
+    if tags:
+        print(f"Tags: {tags}")
+    print("\nQuestion:")
+    print(payload.get("question", ""))
+    print("\nAnswer JSON:")
+    print(json.dumps(payload["answer_template"], ensure_ascii=False, indent=2))
+    print("\nSubmit:")
+    print("  r2ai-model answer < answer.json")
+    print("  r2ai-model answer --file answer.json")
+    return 0
+
+
+def cmd_play(args: argparse.Namespace) -> int:
+    return run_python("memory.py", ["ask", "--source", args.source])
+
+
+def cmd_answer(args: argparse.Namespace) -> int:
+    return run_python(
+        "memory.py",
+        ["answer-file", "--file", args.file, "--source", args.source],
+    )
+
+
+def cmd_queue(args: argparse.Namespace) -> int:
+    command = ["add-topic", args.topic, "--source", args.source]
+    if args.question:
+        command += ["--question", args.question]
+    if args.tags:
+        command += ["--tags", args.tags]
+    return run_python("memory.py", command)
+
+
+def cmd_remember(args: argparse.Namespace) -> int:
+    command = [
+        "remember",
+        "--topic",
+        args.topic,
+        "--highlight",
+        args.highlight,
+        "--details",
+        args.details,
+        "--source",
+        args.source,
+    ]
+    if args.question:
+        command += ["--question", args.question]
+    if args.tags:
+        command += ["--tags", args.tags]
+    return run_python("memory.py", command)
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    command = ["list"]
+    if args.all:
+        command.append("--all")
+    return run_python("memory.py", command)
+
+
+def cmd_export(_args: argparse.Namespace) -> int:
+    return run_python("memory.py", ["export-training"])
+
+
+def cmd_learn(args: argparse.Namespace) -> int:
+    command = ["build"]
+    if not args.full:
+        command.append("--skip-seeds")
+    command += passthrough_args(args.args)
+    return run_python("agentic-dataset.py", command)
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    return run_python("agentic-dataset.py", ["build", *passthrough_args(args.args)])
+
+
+def cmd_commands(args: argparse.Namespace) -> int:
+    return run_python(
+        "agentic-dataset.py",
+        ["commands", "--queue-memory", *passthrough_args(args.args)],
+    )
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    return run_python(
+        "agentic-dataset.py",
+        ["verify-knowledge", *passthrough_args(args.args)],
+    )
+
+
+def cmd_pending(args: argparse.Namespace) -> int:
+    return run_python("agentic-dataset.py", ["pending", *passthrough_args(args.args)])
+
+
+def cmd_propose(args: argparse.Namespace) -> int:
+    return run_python("agentic-dataset.py", ["propose", *passthrough_args(args.args)])
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    command = ["train"]
+    if args.config:
+        command.append(f"CONFIG={args.config}")
+    return run_make(command)
+
+
+def cmd_preflight(args: argparse.Namespace) -> int:
+    command = ["preflight"]
+    if args.config:
+        command.append(f"CONFIG={args.config}")
+    return run_make(command)
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    command = ["chat"]
+    if args.model:
+        command.append(f"MODEL={args.model}")
+    if args.name:
+        command.append(f"OLLAMA_MODEL={args.name}")
+    if args.context:
+        command.append(f"LLAMA_CTX={args.context}")
+    return run_make(command)
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    command = ["serve"]
+    if args.model:
+        command.append(f"MODEL={args.model}")
+    if args.context:
+        command.append(f"LLAMA_CTX={args.context}")
+    if args.host:
+        command.append(f"LLAMA_HOST={args.host}")
+    if args.port:
+        command.append(f"LLAMA_PORT={args.port}")
+    return run_make(command)
+
+
+def count_status(rows: list[dict[str, Any]], status: str) -> int:
+    return sum(1 for row in rows if row.get("status") == status)
+
+
+def status_payload() -> dict[str, Any]:
+    topics = memory_topics()
+    memories = read_jsonl(MEMORY_PATH)
+    agentic_pending = {
+        str(path): len(read_jsonl(path))
+        for path in AGENTIC_PENDING_PATHS
+    }
+    return {
+        "root": str(ROOT),
+        "memory": {
+            "pending": count_status(topics, "pending"),
+            "answered": count_status(topics, "answered"),
+            "dropped": count_status(topics, "dropped"),
+            "accepted_rows": count_status(memories, "accepted"),
+            "training_rows": len(read_jsonl(MEMORY_TRAINING_PATH)),
+        },
+        "agentic": {
+            "knowledge_rows": len(read_jsonl(KNOWLEDGE_PATH)),
+            "pending_rows": sum(agentic_pending.values()),
+            "pending_by_file": agentic_pending,
+        },
+        "commands": {
+            "rows": len(read_jsonl(COMMANDS_DB_PATH)),
+            "training_rows": len(read_jsonl(COMMANDS_TRAINING_PATH)),
+        },
+        "training": {
+            "merged_rows": len(read_jsonl(TRAINING_MERGE_PATH)),
+        },
+    }
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    payload = status_payload()
+    if args.format == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print(f"root: {payload['root']}")
+    print(
+        "memory: "
+        f"{payload['memory']['pending']} pending, "
+        f"{payload['memory']['answered']} answered, "
+        f"{payload['memory']['accepted_rows']} accepted, "
+        f"{payload['memory']['training_rows']} training rows"
+    )
+    print(
+        "agentic: "
+        f"{payload['agentic']['knowledge_rows']} knowledge rows, "
+        f"{payload['agentic']['pending_rows']} pending rows"
+    )
+    print(
+        "commands: "
+        f"{payload['commands']['rows']} rows, "
+        f"{payload['commands']['training_rows']} training rows"
+    )
+    print(f"training: {payload['training']['merged_rows']} merged rows")
+    return 0
+
+
+def cmd_make(args: argparse.Namespace) -> int:
+    return run_make(args.args)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="r2ai-model",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Front door for r2ai-model agentic learning, human memory prompts, "
+            "and batch agent protocols."
+        ),
+        epilog=EXAMPLES,
+    )
+    parser.add_argument(
+        "--root",
+        action="store_true",
+        help="print the resolved r2ai-model checkout and exit",
+    )
+    sub = parser.add_subparsers(dest="command")
+
+    play_parser = sub.add_parser(
+        "play",
+        aliases=["ask"],
+        help="answer the next human memory prompt interactively",
+    )
+    play_parser.add_argument("--source", default="terminal", help="memory transport name")
+    play_parser.set_defaults(func=cmd_play)
+
+    next_parser = sub.add_parser(
+        "next",
+        aliases=["prompt", "question"],
+        help="print the next prompt and answer schema for batch agents",
+    )
+    next_parser.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        help="output format",
+    )
+    next_parser.set_defaults(func=cmd_next)
+
+    answer_parser = sub.add_parser(
+        "answer",
+        aliases=["submit"],
+        help="record one or more JSON answers from stdin or a file",
+    )
+    answer_parser.add_argument(
+        "--file",
+        "--json-file",
+        default="-",
+        help="JSON answer file, or '-' for stdin",
+    )
+    answer_parser.add_argument("--source", default="r2ai-model", help="memory transport name")
+    answer_parser.set_defaults(func=cmd_answer)
+
+    queue_parser = sub.add_parser(
+        "queue",
+        aliases=["add-topic"],
+        help="queue a topic for human clarification",
+    )
+    queue_parser.add_argument("topic")
+    queue_parser.add_argument("--question", default="", help="specific question to ask")
+    queue_parser.add_argument("--tags", default="", help="comma-separated tags")
+    queue_parser.add_argument("--source", default="r2ai-model", help="memory transport name")
+    queue_parser.set_defaults(func=cmd_queue)
+
+    remember_parser = sub.add_parser("remember", help="record a memory directly")
+    remember_parser.add_argument("--topic", required=True)
+    remember_parser.add_argument("--highlight", required=True)
+    remember_parser.add_argument(
+        "--details",
+        required=True,
+        help="details text, or '-' to read stdin",
+    )
+    remember_parser.add_argument("--question", default="", help="question this memory answers")
+    remember_parser.add_argument("--tags", default="", help="comma-separated tags")
+    remember_parser.add_argument("--source", default="r2ai-model", help="memory transport name")
+    remember_parser.set_defaults(func=cmd_remember)
+
+    list_parser = sub.add_parser("list", help="list memory topics")
+    list_parser.add_argument("--all", action="store_true", help="include answered and dropped topics")
+    list_parser.set_defaults(func=cmd_list)
+
+    export_parser = sub.add_parser("export", help="export accepted memories to training JSONL")
+    export_parser.set_defaults(func=cmd_export)
+
+    commands_parser = sub.add_parser(
+        "commands",
+        help="build command grammar rows and queue memory prompts by default",
+    )
+    commands_parser.add_argument("args", nargs=argparse.REMAINDER, help="extra agentic-dataset.py arguments")
+    commands_parser.set_defaults(func=cmd_commands)
+
+    learn_parser = sub.add_parser(
+        "learn",
+        help="discover and register new agentic knowledge",
+    )
+    learn_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="include fixed seed dataset verification instead of the make agentic default",
+    )
+    learn_parser.add_argument("args", nargs=argparse.REMAINDER, help="extra agentic-dataset.py arguments")
+    learn_parser.set_defaults(func=cmd_learn)
+
+    build_agentic_parser = sub.add_parser("build", help="run agentic-dataset.py build directly")
+    build_agentic_parser.add_argument("args", nargs=argparse.REMAINDER)
+    build_agentic_parser.set_defaults(func=cmd_build)
+
+    verify_parser = sub.add_parser("verify", help="verify executable agentic knowledge")
+    verify_parser.add_argument("args", nargs=argparse.REMAINDER)
+    verify_parser.set_defaults(func=cmd_verify)
+
+    pending_parser = sub.add_parser("pending", help="review agentic pending rows")
+    pending_parser.add_argument("args", nargs=argparse.REMAINDER)
+    pending_parser.set_defaults(func=cmd_pending)
+
+    propose_parser = sub.add_parser("propose", help="propose agentic pending rows with an AI model")
+    propose_parser.add_argument("args", nargs=argparse.REMAINDER)
+    propose_parser.set_defaults(func=cmd_propose)
+
+    train_parser = sub.add_parser(
+        "train",
+        help="install dependencies, merge training data, fine-tune, and export",
+    )
+    train_parser.add_argument(
+        "--config",
+        default="",
+        help="training config relative to training/ (default: config.yaml)",
+    )
+    train_parser.set_defaults(func=cmd_train)
+
+    preflight_parser = sub.add_parser(
+        "preflight",
+        help="validate dataset and model chat-template compatibility",
+    )
+    preflight_parser.add_argument(
+        "--config",
+        default="",
+        help="training config relative to training/ (default: config.yaml)",
+    )
+    preflight_parser.set_defaults(func=cmd_preflight)
+
+    chat_parser = sub.add_parser(
+        "chat",
+        help="load a trained GGUF into Ollama and start a chat",
+    )
+    chat_parser.add_argument(
+        "--model",
+        default="",
+        help="GGUF path relative to training/ (default: config.yaml output)",
+    )
+    chat_parser.add_argument(
+        "--name",
+        default="",
+        help="Ollama model name (default: r2ai-local)",
+    )
+    chat_parser.add_argument("--context", type=int, default=0, help="context window")
+    chat_parser.set_defaults(func=cmd_chat)
+
+    serve_parser = sub.add_parser(
+        "serve",
+        help="serve a trained GGUF through llama.cpp",
+    )
+    serve_parser.add_argument("--model", default="", help="GGUF path relative to training/")
+    serve_parser.add_argument("--context", type=int, default=0, help="context window")
+    serve_parser.add_argument("--host", default="", help="listen host")
+    serve_parser.add_argument("--port", type=int, default=0, help="listen port")
+    serve_parser.set_defaults(func=cmd_serve)
+
+    status_parser = sub.add_parser("status", help="show learning queue and dataset counts")
+    status_parser.add_argument("--format", choices=["text", "json"], default="text")
+    status_parser.set_defaults(func=cmd_status)
+
+    make_parser = sub.add_parser("make", help="run a Makefile target in this checkout")
+    make_parser.add_argument("args", nargs=argparse.REMAINDER)
+    make_parser.set_defaults(func=cmd_make)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    if argv == ["--root"]:
+        print(ROOT)
+        return 0
+    if not argv:
+        parser.print_help()
+        return 0
+    args = parser.parse_args(argv)
+    if getattr(args, "root", False):
+        print(ROOT)
+        return 0
+    if not hasattr(args, "func"):
+        parser.print_help()
+        return 0
+    return int(args.func(args))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

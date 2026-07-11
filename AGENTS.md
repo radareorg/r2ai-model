@@ -32,20 +32,22 @@ r2ai-model next --format json
 r2ai-model answer < answer.json
 make memory-export
 
-# merge all training-ready datasets
-make -C training merge-agentic-dataset
-
-# train with training/config.yaml against the merged agentic dataset
-make -C training train-agentic CONFIG=config.yaml
+# validate templates, then install deps, merge all data, train, and export GGUF
+make preflight
+make train
+r2ai-model preflight
+r2ai-model train
 
 # train MiniCPM5 against the merged agentic dataset
 make -C training train-minicpm5
 
-# chat with a trained GGUF through Ollama
-make -C training chat MODEL=radare2-smollm-finetuned.gguf
+# chat with the default trained GGUF through Ollama
+make chat
+r2ai-model chat
 
 # serve a trained GGUF through llama.cpp
-make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
+make serve
+r2ai-model serve
 ```
 
 Before custom training, set the config:

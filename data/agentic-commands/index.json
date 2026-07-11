@@ -1,5 +1,5 @@
 {
-  "ai_mode": "auto",
+  "ai_mode": "off",
   "command_rows": 240,
   "documented_rows": 45,
   "human_reviewed_rows": 10,
@@ -14,5 +14,6 @@
     "r2:<command>? help"
   ],
   "synthetic_memory_rows": 1,
-  "updated_at": "2026-07-10T18:15:45Z"
+  "training_rows": 55,
+  "updated_at": "2026-07-11T09:37:13Z"
 }

@@ -7,7 +7,6 @@ and exports it to GGUF format (Linux/NVIDIA) or MLX format (Mac).
 """
 
 import argparse
-import copy
 import json
 import os
 import platform
@@ -21,7 +20,6 @@ from typing import Optional
 import torch
 import yaml
 from datasets import DatasetDict, load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -33,29 +31,6 @@ from transformers import (
 DEFAULT_MAX_LENGTH = 2048
 DEFAULT_SPLIT_SEED = 42
 PREPROCESSING_VERSION = 5
-
-
-def common_prefix_length(left: str, right: str) -> int:
-    length = 0
-    while length < min(len(left), len(right)) and left[length] == right[length]:
-        length += 1
-    return length
-
-
-def token_aligned_prefix_length(tokenizer, text: str, character_limit: int) -> int:
-    encoded = tokenizer(
-        text,
-        add_special_tokens=False,
-        return_offsets_mapping=True,
-    )
-    return max(
-        (
-            end
-            for start, end in encoded["offset_mapping"]
-            if end > start and end <= character_limit
-        ),
-        default=0,
-    )
 
 
 def normalize_split_text(value: str, *, words_only: bool = False) -> str:
@@ -286,26 +261,56 @@ def _latest_mtime_in_directory(path: Path) -> float:
             latest = max(latest, file.stat().st_mtime)
     return latest
 
-def setup_model_and_tokenizer(config):
-    """Setup model and tokenizer based on config."""
+def setup_tokenizer(config):
+    """Load and validate the tokenizer required by the dataset pipeline."""
     model_name = config['model']['name']
     tokenizer_name = config['model'].get('tokenizer') or model_name
 
-    print(f"Loading model: {model_name}")
     print(f"Loading tokenizer: {tokenizer_name}")
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    use_fast = bool(config.get('quantization', {}).get('use_fast_tokenizer', True))
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=use_fast)
+    if not tokenizer.is_fast:
+        raise ValueError(
+            "This training pipeline requires a fast tokenizer for exact assistant-only "
+            "loss masking. Set quantization.use_fast_tokenizer=true and select a model "
+            "with a fast tokenizer implementation."
+        )
+    if not tokenizer.chat_template:
+        raise ValueError(
+            f"Tokenizer {tokenizer_name} has no chat template. Select an instruct/chat "
+            "checkpoint or explicitly configure a compatible tokenizer."
+        )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    return tokenizer
+
+
+def setup_model_and_tokenizer(config):
+    """Setup model and tokenizer based on config."""
+    model_name = config['model']['name']
+    tokenizer = setup_tokenizer(config)
+
+    print(f"Loading model: {model_name}")
+
+    cuda_available = torch.cuda.is_available()
+    use_bf16 = cuda_available and torch.cuda.is_bf16_supported()
+    model_dtype = (
+        torch.bfloat16 if use_bf16
+        else torch.float16 if cuda_available
+        else torch.float32
+    )
 
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto" if torch.cuda.is_available() else None,
+        dtype=model_dtype,
+        device_map="auto" if cuda_available else None,
     )
 
     # Apply LoRA if enabled
     if config.get('lora', {}).get('use_lora', False):
+        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+
         lora_config = LoraConfig(
             r=config['lora']['r'],
             lora_alpha=config['lora']['lora_alpha'],
@@ -314,7 +319,10 @@ def setup_model_and_tokenizer(config):
             bias="none",
             task_type="CAUSAL_LM",
         )
-        model = prepare_model_for_kbit_training(model)
+        if getattr(model, "is_loaded_in_4bit", False) or getattr(
+            model, "is_loaded_in_8bit", False
+        ):
+            model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
@@ -339,63 +347,25 @@ def tokenize_chat(
     for index, message in enumerate(messages):
         if message.get("role") != "assistant":
             continue
-
-        without_assistant = copy.deepcopy(messages)
-        without_assistant[index]["role"] = "__masked_assistant__"
-        omitted = tokenizer.apply_chat_template(
-            without_assistant,
-            tokenize=False,
-            add_generation_prompt=False,
-            **template_kwargs,
-        )
-        prefix = common_prefix_length(rendered, omitted)
-        suffix = 0
-        suffix_limit = min(len(rendered), len(omitted))
-        while suffix < suffix_limit:
-            if rendered[-1 - suffix] != omitted[-1 - suffix]:
-                break
-            suffix += 1
-
-        context = messages[:index]
-        context_text = tokenizer.apply_chat_template(
-            context,
-            tokenize=False,
-            add_generation_prompt=False,
-            **template_kwargs,
-        )
         generation_prompt = tokenizer.apply_chat_template(
             messages[:index],
             tokenize=False,
             add_generation_prompt=True,
             **template_kwargs,
         )
-        if not generation_prompt.startswith(context_text):
-            raise ValueError("Chat template generation prompt is not append-only")
-        prompt_suffix = generation_prompt[len(context_text):]
-
-        removed_length = len(rendered) - len(omitted)
-        earliest = max(0, len(omitted) - suffix)
-        candidates = []
-        for candidate_start in range(earliest, prefix + 1):
-            candidate_end = candidate_start + removed_length
-            if rendered[:candidate_start] + rendered[candidate_end:] != omitted:
-                continue
-            assistant_block = rendered[candidate_start:candidate_end]
-            raw_prompt_length = common_prefix_length(prompt_suffix, assistant_block)
-            prompt_length = token_aligned_prefix_length(
-                tokenizer,
-                assistant_block,
-                raw_prompt_length,
-            )
-            candidates.append((raw_prompt_length, prompt_length, candidate_start))
-        if not candidates:
-            raise ValueError("Chat template cannot isolate an assistant turn")
-        _, prompt_length, start = max(
-            candidates,
-            key=lambda item: (item[0], -item[2]),
+        completed_turn = tokenizer.apply_chat_template(
+            messages[:index + 1],
+            tokenize=False,
+            add_generation_prompt=False,
+            **template_kwargs,
         )
-        end = start + removed_length
-        spans.append((start + prompt_length, end))
+        if not completed_turn.startswith(generation_prompt):
+            raise ValueError("Chat template assistant turn is not append-only")
+        if not rendered.startswith(completed_turn):
+            raise ValueError("Chat template conversation prefixes are not stable")
+        if len(completed_turn) == len(generation_prompt):
+            raise ValueError("Chat template rendered an empty assistant target")
+        spans.append((len(generation_prompt), len(completed_turn)))
 
     if not spans:
         raise ValueError("Conversation has no assistant turn")
@@ -441,17 +411,22 @@ def load_and_prepare_dataset(config, tokenizer):
     # Load JSONL dataset
     dataset = load_dataset('json', data_files=str(dataset_path))
 
-    def tokenize_function(examples):
+    def tokenize_function(examples, indices):
         tools = examples.get("tools")
-        rows = [
-            tokenize_chat(
-                tokenizer,
-                messages,
-                max_length,
-                tools[index] if tools else None,
-            )
-            for index, messages in enumerate(examples['messages'])
-        ]
+        rows = []
+        for index, messages in enumerate(examples['messages']):
+            try:
+                rows.append(tokenize_chat(
+                    tokenizer,
+                    messages,
+                    max_length,
+                    tools[index] if tools else None,
+                ))
+            except Exception as exc:
+                raise ValueError(
+                    f"Dataset row {indices[index]} is incompatible with the chat "
+                    f"template from {tokenizer.name_or_path}: {exc}"
+                ) from exc
         return {
             name: [row[name] for row in rows]
             for name in ("input_ids", "attention_mask", "labels")
@@ -462,14 +437,16 @@ def load_and_prepare_dataset(config, tokenizer):
     split_dataset = group_train_test_split(dataset['train'], test_size, split_seed)
 
     tokenized_datasets = DatasetDict({
-        'train': split_dataset['train'].map(tokenize_function, batched=True, remove_columns=split_dataset['train'].column_names),
-        'test': split_dataset['test'].map(tokenize_function, batched=True, remove_columns=split_dataset['test'].column_names),
+        'train': split_dataset['train'].map(tokenize_function, batched=True, with_indices=True, remove_columns=split_dataset['train'].column_names),
+        'test': split_dataset['test'].map(tokenize_function, batched=True, with_indices=True, remove_columns=split_dataset['test'].column_names),
     })
 
     return tokenized_datasets
 
 def train_model(config, model, tokenizer, dataset):
     """Train the model."""
+    cuda_available = torch.cuda.is_available()
+    use_bf16 = cuda_available and torch.cuda.is_bf16_supported()
     training_args = TrainingArguments(
         output_dir=config['training']['output_dir'],
         num_train_epochs=config['training']['num_train_epochs'],
@@ -487,8 +464,8 @@ def train_model(config, model, tokenizer, dataset):
         greater_is_better=config['training']['greater_is_better'],
         eval_strategy="steps",
         save_strategy="steps",
-        fp16=False,
-        bf16=torch.cuda.is_available(),
+        fp16=cuda_available and not use_bf16,
+        bf16=use_bf16,
         dataloader_pin_memory=False,
     )
 
@@ -509,9 +486,19 @@ def train_model(config, model, tokenizer, dataset):
     print("Starting training...")
     trainer.train()
 
-    # Save the final model
+    # Save a complete model for inference and GGUF conversion. PEFT's normal
+    # save path contains only the adapter, so merge it into the base model first.
     final_model_path = os.path.join(config['training']['output_dir'], "final_model")
-    trainer.save_model(final_model_path)
+    if config.get('lora', {}).get('use_lora', False):
+        adapter_path = os.path.join(config['training']['output_dir'], "adapter_model")
+        trainer.save_model(adapter_path)
+        tokenizer.save_pretrained(adapter_path)
+        print(f"LoRA adapter saved to: {adapter_path}")
+        merged_model = trainer.model.merge_and_unload()
+        merged_model.save_pretrained(final_model_path, safe_serialization=True)
+        print(f"Merged inference model saved to: {final_model_path}")
+    else:
+        trainer.save_model(final_model_path)
     tokenizer.save_pretrained(final_model_path)
 
     return final_model_path
@@ -595,6 +582,11 @@ def parse_args():
         default=os.environ.get("TRAIN_CONFIG", "config.yaml"),
         help="Training config path, relative to the training directory by default.",
     )
+    parser.add_argument(
+        "--preflight",
+        action="store_true",
+        help="validate the dataset against the tokenizer chat template without loading model weights",
+    )
     return parser.parse_args()
 
 
@@ -604,6 +596,16 @@ def main():
 
     dataset_path = _resolve_dataset_path(config)
     config['dataset']['path'] = str(dataset_path)
+
+    if args.preflight:
+        tokenizer = setup_tokenizer(config)
+        dataset = load_and_prepare_dataset(config, tokenizer)
+        print(
+            f"Preflight passed: {len(dataset['train'])} train rows and "
+            f"{len(dataset['test'])} test rows are compatible with "
+            f"{tokenizer.name_or_path}."
+        )
+        return
 
     output_dir = Path(config['training']['output_dir'])
     if not output_dir.is_absolute():

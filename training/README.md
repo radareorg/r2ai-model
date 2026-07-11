@@ -8,6 +8,7 @@ This directory contains the training pipeline for fine-tuning language models on
 training/
 ├── config.yaml          # Default model, training, and export settings
 ├── config.minicpm5.yaml # MiniCPM5 agentic training settings
+├── config.lfm2.5.yaml   # LFM2.5-1.2B agentic training settings
 ├── train.py            # Main training script
 ├── Makefile            # Automation script for the entire pipeline
 └── README.md           # This file
@@ -15,16 +16,21 @@ training/
 
 ## Quick Start
 
-To run the classic training pipeline:
+From the repository root, run the complete default workflow:
 
 ```bash
-make -C training
+make train
+# or
+r2ai-model train
 ```
 
-To train from the merged agentic dataset:
+This installs/repairs dependencies, rebuilds the merged training-ready dataset,
+fine-tunes with LoRA, merges the adapter, and exports GGUF. Check tokenizer and
+template compatibility first without loading model weights:
 
 ```bash
-make -C training train-agentic CONFIG=config.yaml
+make preflight
+r2ai-model preflight
 ```
 
 To train MiniCPM5 from the merged agentic dataset:
@@ -36,7 +42,9 @@ make -C training train-minicpm5
 To chat with a trained GGUF through Ollama:
 
 ```bash
-make -C training chat MODEL=radare2-smollm-finetuned.gguf
+make chat
+# or
+r2ai-model chat
 ```
 
 To serve a GGUF through llama.cpp:
@@ -54,7 +62,7 @@ This will:
 
 ## Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - CUDA-compatible GPU (recommended for Linux)
 - Sufficient disk space for model weights and datasets
 - API keys for LLM services (if regenerating dataset from scratch)
@@ -63,7 +71,8 @@ This will:
 
 Edit `config.yaml` to customize:
 
-- **Model**: Change `model.name` to any Hugging Face causal LM, or use `config.minicpm5.yaml` for `openbmb/MiniCPM5-1B`
+- **Model**: Select an instruct/chat causal LM whose fast tokenizer provides a
+  chat template and supports tools; use preflight before training
 - **Training**: Adjust epochs, batch size, learning rate, etc.
 - **Dataset context**: Adjust `dataset.max_length` (default 2048); batches use
   dynamic padding rather than padding every row to that limit
@@ -73,8 +82,9 @@ Edit `config.yaml` to customize:
   template and require a tokenizer with `chat_template` metadata
 - **Loss masking**: System, user, and assistant-prompt tokens provide context
   but only assistant response and end-of-turn tokens contribute to loss
-- **Tools**: Function definitions, assistant tool calls, and tool results are
-  preserved; tool calls are supervised while tool results remain masked context
+- **Tools**: Function definitions and assistant tool calls are preserved with
+  structured arguments; the classic conversion stops before any unavailable
+  tool result
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning
@@ -113,10 +123,10 @@ make -C training merge-agentic-dataset
 ### 3. Train Model
 ```bash
 make -C training train
-# or, for the merged agentic dataset
-make -C training train-agentic CONFIG=config.yaml
 # or MiniCPM5
 make -C training train-minicpm5
+# or LFM2.5
+make -C training train-lfm25
 ```
 
 ### 4. Individual Targets
@@ -125,13 +135,14 @@ make -C training help                 # Show all available targets
 make memory-export                       # Optional; merge-agentic-dataset refreshes this too
 make -C training merge-agentic-dataset # Build merged training JSONL
 make -C training clean                # Clean up environment and outputs
-make -C training chat MODEL=radare2-smollm-finetuned.gguf
+make -C training chat
 make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf
 ```
 
 ## Dataset
 
-The classic training target uses `../data/radare2/radare2_train.jsonl`. The agentic targets use `../data/training/radare2_all_agentic_train.jsonl`. This dataset contains:
+All included training targets use
+`../data/training/radare2_all_agentic_train.jsonl`. This dataset contains:
 - Questions about radare2 usage
 - Corresponding radare2 commands as answers
 - Verified agentic knowledge and command workflows
@@ -147,9 +158,8 @@ The classic training target uses `../data/radare2/radare2_train.jsonl`. The agen
 - Optimized for GPU inference
 
 ### Mac (MLX)
-- Exports to Apple's MLX format
-- Optimized for Apple Silicon GPUs
-- Requires MLX library
+- MLX export is not implemented by `train.py` yet; use the model vendor's MLX
+  conversion/runtime until that exporter is added
 
 ## Platform Support
 

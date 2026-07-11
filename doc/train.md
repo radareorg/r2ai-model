@@ -63,53 +63,57 @@ the tokenizer must therefore provide `chat_template` metadata.
 Labels are masked to `-100` for system, user, and assistant-prompt tokens, so
 loss is computed only on assistant response bodies and their end-of-turn tokens.
 Function-calling rows pass their `tools` definitions to the same native chat
-template. Assistant tool calls and final assistant responses are supervised;
-`tool` result messages remain masked context.
+template. The current classic tool rows supervise the assistant's `r2cmd` call
+and structured arguments, then stop because no real tool output exists.
 
 Useful model choices:
 
 ```yaml
-# smoke test
-name: "HuggingFaceTB/SmolLM-135M"
-
-# small local instruct models
-name: "Qwen/Qwen2.5-1.5B-Instruct"
-name: "Qwen/Qwen2.5-3B-Instruct"
-
-# small fast tool-calling model
+# included small tool-capable configs
 name: "openbmb/MiniCPM5-1B"
+name: "LiquidAI/LFM2.5-1.2B-Instruct"
 
 # current heavier default
 name: "jan-hq/Qwen3-4B-no-think"
 ```
 
-For larger models, enable LoRA:
+The included configs use LoRA with portable `all-linear` target selection:
 
 ```yaml
 lora:
   use_lora: true
 ```
 
-Train with the selected config:
+Validate all rows against a model template without loading weights:
 
 ```sh
-make -C training train-agentic CONFIG=config.yaml
+r2ai-model preflight
+r2ai-model preflight --config config.minicpm5.yaml
 ```
 
-Train MiniCPM5 with the included config:
+Train the default model, including dependency setup, merge, and GGUF export:
+
+```sh
+make train
+r2ai-model train
+```
+
+Alternative included configs:
 
 ```sh
 make -C training train-minicpm5
+make -C training train-lfm25
 ```
 
 MiniCPM5 uses the standard Llama causal-LM architecture, but its model card recommends `transformers>=5.6`. The training requirements reflect that floor.
 
 ## Chat Or Serve
 
-Use the default small GGUF with Ollama:
+Use the default GGUF with Ollama:
 
 ```sh
-make -C training chat
+make chat
+r2ai-model chat
 ```
 
 Use a specific GGUF from disk:

@@ -4,10 +4,10 @@ torchvision>=0.15.0+cu118 --index-url https://download.pytorch.org/whl/cu118
 torchaudio>=2.0.0+cu118 --index-url https://download.pytorch.org/whl/cu118
 
 # Transformers and datasets
-transformers>=5.6.0
+transformers>=5.6.0,<6.0
 datasets>=2.12.0
 accelerate>=0.20.0
-peft>=0.4.0
+peft>=0.18.0,<1.0
 
 # Data processing
 numpy>=1.24.0

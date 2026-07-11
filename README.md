@@ -41,6 +41,10 @@ r2ai-model commands
 r2ai-model learn
 r2ai-model verify
 r2ai-model status
+r2ai-model preflight
+r2ai-model train
+r2ai-model chat
+r2ai-model serve
 r2ai-model play
 r2ai-model next --format json > question.json
 r2ai-model answer < answer.json
@@ -179,5 +183,6 @@ Optional AI proposal mode:
 OPENAI_API_KEY=... ./agentic-dataset.py propose --count 20
 ```
 
-AI proposals are written as agentic-only pending rows and must still pass the
-local verifier before they are promoted to training data.
+AI proposals are written to `data/agentic-review/ai-proposals.jsonl`. This raw
+file is quarantined: the current proposal command does not verify, queue, or
+promote it, and the training merger never reads it.

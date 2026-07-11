@@ -12,20 +12,19 @@ change after running the agentic, memory, review, or merge commands.
 
 ## Active training datasets
 
-`training/Makefile` builds the agentic training dataset from these eight
-files:
+The default training workflow merges these eight files:
 
-| Dataset | Current rows | Purpose |
+| Dataset | Rows | Review or evidence gate |
 | --- | ---: | --- |
-| `data/radare2/function_calling_r2cmd_dataset.jsonl` | 363 | Native-template r2cmd tool-calling conversations |
-| `data/radare2/radare2_train.jsonl` | 363 | Classic question-to-radare2-command examples |
-| `data/radare2-agentic/verified.jsonl` | 10 | Locally executed and checked command examples |
-| `data/r2js/verified.jsonl` | 5 | Embedded JavaScript/r2js examples |
-| `data/reasoning-long/verified.jsonl` | 4 | Multi-step reverse-engineering workflows |
-| `data/agentic-knowledge/knowledge.jsonl` | 349 | Deduplicated source-, documentation-, test-, and experiment-derived knowledge |
-| `data/agentic-commands/verified.jsonl` | 240 | Training export of command grammar explanations |
-| `data/memory/verified.jsonl` | 9 | Exported human corrections |
-| **Current source total** | **1,343** | Expected result of a fresh merge |
+| `data/radare2/function_calling_r2cmd_dataset.jsonl` | 363 | Deterministic conversion of the classic accepted commands; not separately executed |
+| `data/radare2/radare2_train.jsonl` | 363 | Compiled from the legacy accepted TSV; malformed rows are skipped |
+| `data/radare2-agentic/verified.jsonl` | 10 | Command execution and declared checks pass on local fixtures |
+| `data/r2js/verified.jsonl` | 5 | Local r2js execution and checks pass |
+| `data/reasoning-long/verified.jsonl` | 4 | Local multi-command execution and checks pass |
+| `data/agentic-knowledge/knowledge.jsonl` | 349 | Mixed: 203 executable, 6 source-scan checked, 140 source-grounded but not executable |
+| `data/agentic-commands/verified.jsonl` | 55 | Only 45 locally documented and 10 human-reviewed rows; 185 uncertain rows are withheld |
+| `data/memory/verified.jsonl` | 9 | Direct human corrections exported from accepted memory records |
+| **Current source total** | **1,158** | Expected result of a fresh merge |
 
 The merge validates every conversation and writes a uniform training-only row
 containing `messages` and optional `tools`. It does not shuffle, split, or
@@ -41,28 +40,155 @@ training loader consumes only `messages` and optional `tools`, and
 heterogeneous verification check values cannot be represented by one inferred
 Arrow schema.
 
-The current generated artifact contains all 1,343 rows from the eight sources.
+The current generated artifact contains all 1,158 rows from the eight sources.
 The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
 length until collation.
-At preprocessing time, `apply_chat_template(tokenize=True)` adds and tokenizes
-the model-specific role markers, separators, and end-of-turn tokens in one step,
-avoiding duplicated special tokens.
+At preprocessing time, the selected tokenizer's native chat template renders
+model-specific role markers, separators, tool calls, and end-of-turn tokens.
+The rendered text is tokenized with `add_special_tokens=False` so special tokens
+are not duplicated and offset mappings remain available for loss masking.
 Training labels use `-100` outside assistant response spans. System prompts,
 user questions, and model-specific assistant prompt markers remain in
 `input_ids` as context but do not contribute directly to the loss.
 Function-calling rows also retain top-level tool definitions, assistant
-`tool_calls`, and `tool` result messages. Assistant tool calls and final
-responses are supervised; tool results remain masked context.
+`tool_calls`, and structured argument objects. They intentionally stop after
+the assistant tool call: the classic source has no real r2 execution output, so
+the old command-echo "result" is no longer fabricated as training data.
 
 There is no persistent split artifact. Training creates a deterministic,
 group-aware test split using `dataset.test_split` and `dataset.split_seed`.
 Rows sharing a normalized user question, exact assistant target, or canonical
 tool call are connected and assigned together, preventing command variants and
 their tool-calling equivalents from leaking across train and test.
-`training/config.yaml` currently points to the classic 363-row dataset, while
-`training/config.minicpm5.yaml` points to the merged agentic dataset.
+The current split is 1,042 train rows and 116 test rows across 744 related-row
+groups. There are 361 duplicated user-question groups covering 726 rows, mostly
+the deliberate classic text-answer/tool-call pairs. They are kept in the same
+split, but their duplicated weight should be evaluated by ablation.
+
+All included configs point to the merged dataset. `training/config.yaml` is the
+default Qwen3 4B LoRA run; `training/config.minicpm5.yaml` and
+`training/config.lfm2.5.yaml` provide smaller non-Qwen alternatives.
+
+## Creation, maintenance, and review lifecycle
+
+The repository does not have one uniform definition of "verified." The actual
+promotion paths are:
+
+| Source family | Created by | Machine review | Human review | Enters training when |
+| --- | --- | --- | --- | --- |
+| Classic TSV | Historical/manual and LLM-assisted TSV generation | Shape checks in `prepare-dataset.py` only | Accepted rows live in `radare2_ok.tsv`; pending files use `review-pending.sh` | It compiles to a valid Q/A row |
+| Classic tool calls | `r2cmd.py` converts each classic command | Deterministic schema conversion; no r2 execution | Inherits classic acceptance | Tool name and structured command argument are valid |
+| Fixed agentic seeds | Humans author `seeds.json` or `tasks.json` | radare2/r2js runs locally and every declared check passes | Failures may enter `pending-human.jsonl` | Verification succeeds |
+| Agentic knowledge | Deterministic source/doc/test scanners, experiments, optional online collection, and accepted human answers | ID/content dedupe, quality filters, category caps; executable rows run checks | Pending answers are recorded in `human-responses.jsonl` | The builder promotes it to the aggregate; not every row has executable evidence |
+| Command grammar | Local radare2 help and `?*` parsing | Help command succeeds and evidence lines are retained | Memory answers can replace weak decompositions | Status is `documented` or `human-reviewed`; `needs-memory` is now excluded |
+| Human memory | A person answers a queued topic or records a correction | JSON/schema, fingerprint, and duplicate handling; no factual verifier | The submitter is the review authority | Memory status is accepted and `memory.py export-training` runs |
+| AI proposals | `agentic-dataset.py propose` calls an OpenAI-compatible model | JSON parsing only | None in the proposal command itself | Never automatically; `ai-proposals.jsonl` is currently disconnected from promotion |
+
+`make agentic` is primarily deterministic and local. Optional AI is used to
+draft proposal rows or better questions for humans; those outputs are not a
+trusted answer source by themselves. The legacy `generate-dataset.py` and
+`enrich-dataset.py` paths can call external models, but the normal compile target
+does not invoke them: it rebuilds from the existing accepted/enriched files.
+
+The agentic knowledge aggregate currently contains 203 rows with successful
+executable checks, 6 with `source-scan-ok`, and 140 without machine-verification
+metadata. Two aggregate rows are tagged `human-review`. The 9 human-memory rows
+are a separate, explicitly human-authored source. This distinction matters:
+valid JSON and provenance are not the same as factual or executable validation.
+
+Current human-review state is 297 memory topics (290 pending and 7 answered),
+3 curated agentic questions, and 3 recorded agentic responses. The largest
+quality bottleneck is the review backlog, including 185 command rows that remain
+in `commands.jsonl` but are deliberately absent from training.
+
+## Training and model compatibility
+
+The public workflows are:
+
+```sh
+make train
+make chat
+
+# The installed/source CLI exposes the same operations.
+r2ai-model train
+r2ai-model chat
+```
+
+`make train` and `r2ai-model train` create/update the venv, repair compatible
+dependencies, rebuild classic and tool-call rows, export human memory, merge all
+training-ready sources, train with LoRA by default, merge the adapter into a
+complete model, and export GGUF. `make chat` and `r2ai-model chat` import the
+default GGUF into Ollama and start the session. The default chat filename now
+matches the default Qwen config output.
+
+Before downloading model weights or starting an expensive run, validate a
+config's tokenizer and every dataset row:
+
+```sh
+r2ai-model preflight
+r2ai-model preflight --config config.minicpm5.yaml
+r2ai-model preflight --config config.lfm2.5.yaml
+```
+
+The current 1,158-row corpus passes full preflight with all three included
+configs:
+
+| Config | Model | Parameters | Full template preflight | Intended strength |
+| --- | --- | ---: | --- | --- |
+| `config.yaml` | `jan-hq/Qwen3-4B-no-think` | 4B | Pass | Heavier default |
+| `config.minicpm5.yaml` | `openbmb/MiniCPM5-1B` | 1B | Pass | Small tool use, code, reasoning |
+| `config.lfm2.5.yaml` | `LiquidAI/LFM2.5-1.2B-Instruct` | 1.2B | Pass | Fast edge inference and function calling |
+
+Passing preflight means the fast tokenizer, chat template, structured tool
+calls, assistant-only labels, maximum length, and split all work. It does not
+prove that a completed fine-tune is accurate. No full training run or held-out
+executable model benchmark was completed as part of this audit, and the project
+currently has no such benchmark; model quality is therefore unknown rather than
+"good."
+
+A new model is suitable only if it is an instruct/chat causal LM with a fast
+tokenizer, a stable append-only chat template, and native `tools`/`tool_calls`
+support for the full dataset. Base models such as GPT-2 or base SmolLM do not
+meet that contract without supplying a template, and a chat model that ignores
+tools is unsuitable for the r2 agent objective. Run preflight for every model
+change. LoRA uses PEFT's `all-linear` target selection to avoid Qwen-specific
+module names.
+
+The reported `HybridCache` import failure came from `peft 0.17.1` with
+`transformers 5.13.1`. Requirements now enforce `peft>=0.18,<1` and
+`transformers>=5.6,<6`, so the normal requirements install upgrades stale PEFT
+without requesting a blanket upgrade of an otherwise valid PyTorch/CUDA stack.
+The repaired environment imports `peft 0.19.1` with `transformers 5.13.1`.
+
+## Improvements still needed
+
+In priority order:
+
+1. Build a frozen executable evaluation set that is never merged into training.
+   Score exact/normalized command selection, tool-call JSON, command execution,
+   expected output checks, refusal on unsafe/unknown requests, and multi-turn
+   recovery. The current grouped 10% split measures loss, not useful r2 ability.
+2. Work down the 290-topic human backlog, starting with common command grammar.
+   Each accepted correction should rebuild `commands.jsonl`, its 55-row-or-larger
+   trusted export, and the merged dataset.
+3. Add an explicit trust policy for the 140 agentic-knowledge rows without
+   machine checks and the legacy 363 Q/A pairs. Require a human approval marker,
+   a source assertion check, or an executable fixture before high-weight use.
+4. Connect AI proposals to a verifier-and-human-review import command, or keep
+   them clearly quarantined. Never merge raw `ai-proposals.jsonl` directly.
+5. Add real fixture-backed multi-turn tool traces: assistant call, actual r2
+   output as a masked tool message, and a grounded final answer. The current
+   tool rows correctly teach selection only.
+6. Add a versioned manifest with source hashes, row counts, trust tiers, build
+   command, tokenizer, and split seed. This makes model/data provenance
+   reproducible instead of relying on mutable generated paths.
+7. Compare source weighting and ablations. The paired 363 classic text and 363
+   tool-call rows dominate the corpus and may suppress the smaller, higher-trust
+   sources. Report results per dataset family, not only aggregate eval loss.
+8. Record full-run metrics and resource use for Qwen, MiniCPM5, and LFM2.5,
+   including base-vs-fine-tuned executable scores and GGUF/Ollama smoke tests.
 
 ## Training row structure
 
@@ -111,8 +237,10 @@ variants.
   conversations.
 * `function_calling_r2cmd_dataset.jsonl` contains 363 tool-calling conversions
   and is included in the active merge. Each row has a `messages` array and an
-  `r2cmd` definition in `tools`. Its conversation contains system, user,
-  assistant tool call, tool result, and final assistant messages.
+  `r2cmd` definition in `tools`. Its conversation contains system, user, and a
+  final assistant tool call with object-form arguments. Stable call IDs are
+  derived from the question and command, and source ordering is deterministic.
+  No fake tool result or final answer is generated.
 * `converted_r2cmd_dataset_good_for_mistral.jsonl` contains 3,778 rows in the
   same general function-calling style. It remains a legacy prebuilt artifact
   outside the active merge, but the training loader now supports its structure
@@ -218,8 +346,9 @@ command answers.
 `data/agentic-knowledge/` is the generated, quality-filtered knowledge base:
 
 * `knowledge.jsonl`: 349 deduplicated aggregate rows. It contains 203
-  `agentic_knowledge` rows and 146 `agentic_experiment` rows. Of these, 209
-  have executable verification metadata and 335 have titles.
+  `agentic_knowledge` rows and 146 `agentic_experiment` rows. Of these, 203
+  have successful executable verification, 6 have source-scan checks, 140 have
+  no machine-verification status, and 335 have titles.
 * `runs/*.jsonl`: 43 append-only audit shards containing 330 unique rows. Every
   current shard row is represented in the aggregate. Do not train from the
   shards separately.
@@ -242,7 +371,9 @@ modifiers, iterators, and command-line composition:
 
 * `commands.jsonl`: 240 source records: 45 `documented`, 185 `needs-memory`,
   and 10 `human-reviewed`.
-* `verified.jsonl`: 240 simplified chat-format training exports.
+* `verified.jsonl`: 55 simplified chat-format training exports: the 45
+  `documented` and 10 `human-reviewed` records. The 185 `needs-memory` rows are
+  retained for maintenance and review but are not training data.
 * `memory-topics.jsonl`: 24 clarification topics derived from weak command
   rows.
 * `knowledge-memory-topics.jsonl`: 24 clarification topics derived from
@@ -258,7 +389,7 @@ verification. Human-reviewed rows can also have `memory_refs` and
 
 `data/memory/` stores corrections and clarifications supplied by humans:
 
-* `topics.jsonl`: 273 clarification topics, currently 266 pending and 7
+* `topics.jsonl`: 297 clarification topics, currently 290 pending and 7
   answered.
 * `memory.jsonl`: 9 accepted source memories.
 * `verified.jsonl`: 9 exported chat-format training rows.
@@ -284,6 +415,8 @@ make memory-export
 * `generated-failures.tsv`: currently header-only.
 * `human-responses.jsonl`: 3 review records containing the action, human
   answer, original pending object, timestamps, and source queue.
+* `ai-proposals.jsonl`, when generated, is raw AI proposal storage only. The
+  current `propose` command does not verify, queue, or promote these rows.
 
 ## ESIL examples
 

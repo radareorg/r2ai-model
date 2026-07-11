@@ -9,10 +9,24 @@ AGENTIC_COMMANDS_ARGS?=
 MEMORY_FORMAT?=text
 MEMORY_FILE?=-
 
-.PHONY: all install uninstall agentic agentic-verify agentic-pending agentic-commands agentic-r2cmd agentic-r2js agentic-reasoning memory agentic-memory agentic-memory-file memory-list memory-export memory-add memory-remember
+.PHONY: all install uninstall preflight train chat serve agentic agentic-verify agentic-pending agentic-commands agentic-r2cmd agentic-r2js agentic-reasoning memory agentic-memory agentic-memory-file memory-list memory-export memory-add memory-remember
 
 all:
 	./review-pending.sh "${TSVFILE}"
+
+# Complete local-model workflows. Command-line CONFIG, MODEL, and OLLAMA_MODEL
+# assignments are forwarded automatically by recursive make.
+train:
+	@$(MAKE) -C training train
+
+preflight:
+	@$(MAKE) -C training preflight
+
+chat:
+	@$(MAKE) -C training chat
+
+serve:
+	@$(MAKE) -C training serve
 
 install:
 	@mkdir -p "$(DESTDIR)$(BINDIR)"

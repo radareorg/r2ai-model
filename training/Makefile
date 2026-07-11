@@ -1,11 +1,11 @@
 # Makefile for Radare2 AI Model Training
 
-.PHONY: all venv deps compile-dataset merge-agentic-dataset train train-agentic train-minicpm5 chat ollama-create serve clean help
+.PHONY: all venv deps compile-dataset merge-agentic-dataset preflight train train-agentic train-minicpm5 train-lfm25 chat ollama-create serve clean help
 VPYTHON=$(shell pwd)/venv/bin/python3
 VPIP=$(shell pwd)/venv/bin/pip3
 CONFIG ?= config.yaml
 MERGED_DATASET ?= ../data/training/radare2_all_agentic_train.jsonl
-MODEL ?= radare2-smollm-finetuned.gguf
+MODEL ?= radare2-qwen3-4b-finetuned.gguf
 MODEL_PATH := $(abspath $(MODEL))
 OLLAMA_MODEL ?= r2ai-local
 LLAMA_CTX ?= 4096
@@ -22,7 +22,7 @@ LLAMA_LIBRARY_PATH ?= $(LLAMA_CPP_BIN)
 endif
 
 # Default target
-all: venv deps compile-dataset train
+all: train
 
 # Create virtual environment
 venv:
@@ -49,7 +49,7 @@ compile-dataset:
 	@echo "Dataset compilation completed."
 
 # Merge all training-ready chat, tool-calling, agentic, command, and memory datasets.
-merge-agentic-dataset:
+merge-agentic-dataset: compile-dataset
 	@echo "Merging chat, tool-calling, agentic, command, and memory datasets into $(MERGED_DATASET)..."
 	mkdir -p ../data/training
 	mkdir -p ../data/agentic-commands
@@ -66,23 +66,28 @@ merge-agentic-dataset:
 		../data/memory/verified.jsonl
 	@echo "Merged dataset written to $(MERGED_DATASET)."
 
-# Train the model with the classic compiled dataset.
-train: venv deps compile-dataset
+# Train the default model with every training-ready dataset.
+train: venv deps merge-agentic-dataset
 	@echo "Starting model training with $(CONFIG)..."
 	$(VPYTHON) train.py --config $(CONFIG)
 	@echo "Training completed."
 
-# Train against the merged agentic dataset. The selected config must point at $(MERGED_DATASET).
-train-agentic: venv deps merge-agentic-dataset
-	@echo "Starting agentic model training with $(CONFIG)..."
-	$(VPYTHON) train.py --config $(CONFIG)
-	@echo "Agentic training completed."
+# Validate tokenizer/template compatibility without loading model weights.
+preflight: venv deps merge-agentic-dataset
+	$(VPYTHON) train.py --config $(CONFIG) --preflight
+
+# Backward-compatible name for the merged-dataset training workflow.
+train-agentic: train
 
 # Train MiniCPM5 on the merged agentic dataset.
 train-minicpm5: CONFIG=config.minicpm5.yaml
-train-minicpm5: train-agentic
+train-minicpm5: train
 
-# Import the selected GGUF into Ollama. Defaults to the small SmolLM GGUF.
+# Train LFM2.5-1.2B-Instruct on the merged dataset.
+train-lfm25: CONFIG=config.lfm2.5.yaml
+train-lfm25: train
+
+# Import the selected GGUF into Ollama. The default matches config.yaml.
 ollama-create:
 	@test -f "$(MODEL_PATH)" || (echo "Missing MODEL=$(MODEL_PATH)"; exit 1)
 	@printf 'FROM %s\nPARAMETER num_ctx %s\nSYSTEM """You are a radare2 reverse engineering assistant. Prefer precise radare2 commands and explain validation evidence."""\n' "$(MODEL_PATH)" "$(LLAMA_CTX)" > .ollama-Modelfile
@@ -110,18 +115,20 @@ clean:
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all                    - Run complete classic pipeline (venv, deps, compile-dataset, train)"
+	@echo "  all                    - Install dependencies, merge training data, train, and export"
 	@echo "  venv                   - Create Python virtual environment"
 	@echo "  deps                   - Install Python dependencies"
 	@echo "  compile-dataset        - Compile the classic dataset from source scripts"
 	@echo "  merge-agentic-dataset  - Merge classic, verified, agentic, command, and memory JSONL datasets"
-	@echo "  train                  - Train with CONFIG (default: config.yaml) after classic dataset compilation"
-	@echo "  train-agentic          - Merge all agentic datasets and train with CONFIG"
+	@echo "  train                  - Install dependencies, merge all training-ready data, and train with CONFIG"
+	@echo "  preflight              - Validate CONFIG tokenizer/template compatibility without model weights"
+	@echo "  train-agentic          - Backward-compatible alias for train"
 	@echo "  train-minicpm5         - Train openbmb/MiniCPM5-1B with config.minicpm5.yaml"
+	@echo "  train-lfm25            - Train LiquidAI/LFM2.5-1.2B-Instruct with config.lfm2.5.yaml"
 	@echo "  chat                   - Import MODEL into Ollama and run an interactive chat"
 	@echo "  serve                  - Serve MODEL with llama.cpp server"
 	@echo "  clean                  - Clean up generated files and environments"
 	@echo "  help                   - Show this help message"
 	@echo ""
 	@echo "Usage: make -C training [target]"
-	@echo "Example: make -C training chat MODEL=radare2-smollm-finetuned.gguf"
+	@echo "Example: make -C training chat"

@@ -1974,6 +1974,11 @@ def merge_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def command_training_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for row in rows:
+        # `needs-memory` means the generated explanation is explicitly
+        # incomplete. Keep it in commands.jsonl and the human question queue,
+        # but do not teach the uncertain decomposition to the model.
+        if row.get("status") not in {"documented", "human-reviewed"}:
+            continue
         out.append({
             "content_fingerprint": row.get("content_fingerprint", ""),
             "id": row.get("id", ""),
@@ -2666,6 +2671,7 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
         "documented_rows": len([row for row in rows if row.get("status") == "documented"]),
         "human_reviewed_rows": len([row for row in rows if row.get("status") == "human-reviewed"]),
         "needs_memory_rows": len(gaps),
+        "training_rows": len(command_training_rows(rows)),
         "last_changed_rows": len(changed),
         "memory_rows_applied": memory_applied,
         "synthetic_memory_rows": synthetic_memory_rows,
