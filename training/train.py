@@ -304,7 +304,6 @@ def setup_model_and_tokenizer(config):
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         dtype=model_dtype,
-        device_map="auto" if cuda_available else None,
     )
 
     # Apply LoRA if enabled
@@ -447,6 +446,9 @@ def train_model(config, model, tokenizer, dataset):
     """Train the model."""
     cuda_available = torch.cuda.is_available()
     use_bf16 = cuda_available and torch.cuda.is_bf16_supported()
+    gradient_checkpointing = bool(
+        config['training'].get('gradient_checkpointing', False)
+    )
     training_args = TrainingArguments(
         output_dir=config['training']['output_dir'],
         num_train_epochs=config['training']['num_train_epochs'],
@@ -466,6 +468,10 @@ def train_model(config, model, tokenizer, dataset):
         save_strategy="steps",
         fp16=cuda_available and not use_bf16,
         bf16=use_bf16,
+        gradient_checkpointing=gradient_checkpointing,
+        gradient_checkpointing_kwargs=(
+            {"use_reentrant": False} if gradient_checkpointing else None
+        ),
         dataloader_pin_memory=False,
     )
 

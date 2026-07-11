@@ -73,7 +73,8 @@ Edit `config.yaml` to customize:
 
 - **Model**: Select an instruct/chat causal LM whose fast tokenizer provides a
   chat template and supports tools; use preflight before training
-- **Training**: Adjust epochs, batch size, learning rate, etc.
+- **Training**: Adjust epochs, batch size, learning rate, and activation-memory
+  savings with `training.gradient_checkpointing`
 - **Dataset context**: Adjust `dataset.max_length` (default 2048); batches use
   dynamic padding rather than padding every row to that limit
 - **Evaluation split**: `dataset.test_split` assigns complete related-example
