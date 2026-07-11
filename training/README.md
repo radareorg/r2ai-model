@@ -67,6 +67,8 @@ Edit `config.yaml` to customize:
 - **Training**: Adjust epochs, batch size, learning rate, etc.
 - **Dataset context**: Adjust `dataset.max_length` (default 2048); batches use
   dynamic padding rather than padding every row to that limit
+- **Evaluation split**: `dataset.test_split` assigns complete related-example
+  groups deterministically using `dataset.split_seed`
 - **Chat format**: Conversations use the selected tokenizer's native chat
   template and require a tokenizer with `chat_template` metadata
 - **Loss masking**: System, user, and assistant-prompt tokens provide context

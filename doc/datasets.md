@@ -56,10 +56,13 @@ Function-calling rows also retain top-level tool definitions, assistant
 `tool_calls`, and `tool` result messages. Assistant tool calls and final
 responses are supervised; tool results remain masked context.
 
-There is no explicit train/validation/test split. `training/config.yaml`
-currently points to the classic 363-row dataset, while
-`training/config.minicpm5.yaml` points to the merged agentic dataset. Set the
-desired `dataset.path` before custom training.
+There is no persistent split artifact. Training creates a deterministic,
+group-aware test split using `dataset.test_split` and `dataset.split_seed`.
+Rows sharing a normalized user question, exact assistant target, or canonical
+tool call are connected and assigned together, preventing command variants and
+their tool-calling equivalents from leaking across train and test.
+`training/config.yaml` currently points to the classic 363-row dataset, while
+`training/config.minicpm5.yaml` points to the merged agentic dataset.
 
 ## Training row structure
 

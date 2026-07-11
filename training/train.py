@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 from hashlib import sha256
@@ -30,7 +31,8 @@ from transformers import (
 )
 
 DEFAULT_MAX_LENGTH = 2048
-PREPROCESSING_VERSION = 4
+DEFAULT_SPLIT_SEED = 42
+PREPROCESSING_VERSION = 5
 
 
 def common_prefix_length(left: str, right: str) -> int:
@@ -54,6 +56,126 @@ def token_aligned_prefix_length(tokenizer, text: str, character_limit: int) -> i
         ),
         default=0,
     )
+
+
+def normalize_split_text(value: str, *, words_only: bool = False) -> str:
+    value = value.casefold()
+    if words_only:
+        value = re.sub(r"[^\w]+", " ", value)
+    return " ".join(value.split())
+
+
+def split_keys(row) -> set[str]:
+    """Return equivalence keys used to keep related rows in one split."""
+    keys = set()
+    messages = row.get("messages") or []
+    for message in messages:
+        role = message.get("role")
+        content = message.get("content")
+        if role == "user" and isinstance(content, str) and content.strip():
+            keys.add("user:" + normalize_split_text(content, words_only=True))
+        if role != "assistant":
+            continue
+        if isinstance(content, str) and content.strip():
+            keys.add("target:" + normalize_split_text(content))
+        for call in message.get("tool_calls") or []:
+            function = call.get("function") or call
+            name = str(function.get("name") or "")
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    arguments = normalize_split_text(arguments)
+            canonical = json.dumps(
+                arguments,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            keys.add(f"tool:{name}:{canonical}")
+            if (
+                isinstance(arguments, dict)
+                and isinstance(arguments.get("command"), str)
+            ):
+                keys.add(
+                    "target:" + normalize_split_text(arguments["command"])
+                )
+    return keys
+
+
+def group_train_test_split(dataset, test_size: float, seed: int) -> DatasetDict:
+    """Split whole related-example components to prevent evaluation leakage."""
+    row_count = len(dataset)
+    if row_count < 2:
+        raise ValueError("At least two rows are required for a train/test split")
+    if not 0 < test_size < 1:
+        raise ValueError("dataset.test_split must be between zero and one")
+
+    parent = list(range(row_count))
+
+    def find(index: int) -> int:
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parent[right_root] = left_root
+
+    owners = {}
+    keys_by_row = []
+    for index, row in enumerate(dataset):
+        keys = split_keys(row)
+        if not keys:
+            keys = {f"row:{index}"}
+        keys_by_row.append(keys)
+        for key in keys:
+            previous = owners.setdefault(key, index)
+            union(index, previous)
+
+    components = {}
+    component_keys = {}
+    for index, keys in enumerate(keys_by_row):
+        root = find(index)
+        components.setdefault(root, []).append(index)
+        component_keys.setdefault(root, set()).update(keys)
+
+    ordered_groups = []
+    for root, indices in components.items():
+        signature = "\0".join(sorted(component_keys[root]))
+        order = sha256(f"{seed}\0{signature}".encode("utf-8")).hexdigest()
+        ordered_groups.append((order, indices))
+    ordered_groups.sort()
+
+    target_test_rows = max(1, round(row_count * test_size))
+    test_indices = []
+    train_indices = []
+    for _, indices in ordered_groups:
+        with_group = len(test_indices) + len(indices)
+        current_distance = abs(target_test_rows - len(test_indices))
+        new_distance = abs(target_test_rows - with_group)
+        if len(test_indices) < target_test_rows and (
+            with_group <= target_test_rows or new_distance < current_distance
+        ):
+            test_indices.extend(indices)
+        else:
+            train_indices.extend(indices)
+
+    if not test_indices or not train_indices:
+        raise ValueError("Group-aware split produced an empty train or test set")
+    print(
+        "Group-aware split: "
+        f"{len(train_indices)} train rows, {len(test_indices)} test rows, "
+        f"{len(components)} groups, seed {seed}"
+    )
+    return DatasetDict({
+        "train": dataset.select(sorted(train_indices)),
+        "test": dataset.select(sorted(test_indices)),
+    })
 
 
 def load_config(config_path: str = "config.yaml"):
@@ -86,6 +208,7 @@ def _build_training_metadata(config, dataset_path: Path, final_model_path: Path)
             "path": str(dataset_path),
             "test_split": config['dataset'].get('test_split'),
             "max_length": config['dataset'].get('max_length', DEFAULT_MAX_LENGTH),
+            "split_seed": config['dataset'].get('split_seed', DEFAULT_SPLIT_SEED),
         },
         "training": config.get("training"),
         "lora": config.get("lora"),
@@ -334,9 +457,9 @@ def load_and_prepare_dataset(config, tokenizer):
             for name in ("input_ids", "attention_mask", "labels")
         }
 
-    # Split dataset
-    test_size = config['dataset']['test_split']
-    split_dataset = dataset['train'].train_test_split(test_size=test_size)
+    test_size = float(config['dataset']['test_split'])
+    split_seed = int(config['dataset'].get('split_seed', DEFAULT_SPLIT_SEED))
+    split_dataset = group_train_test_split(dataset['train'], test_size, split_seed)
 
     tokenized_datasets = DatasetDict({
         'train': split_dataset['train'].map(tokenize_function, batched=True, remove_columns=split_dataset['train'].column_names),

@@ -45,8 +45,15 @@ model:
 
 dataset:
   path: "../data/training/radare2_all_agentic_train.jsonl"
+  test_split: 0.1
+  split_seed: 42
   max_length: 2048
 ```
+
+`test_split` is group-aware and deterministic. Rows sharing a normalized user
+question, assistant target, or canonical tool call remain together, so command
+variants and their tool-calling equivalents cannot leak across train and test.
+`split_seed` controls the stable assignment of complete groups.
 
 `max_length` defaults to 2048 tokens. Tokenized rows keep their natural
 length and are padded dynamically by the batch collator, so short examples do
