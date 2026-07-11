@@ -11,6 +11,7 @@ model:
 dataset:
   path: "../data/radare2/radare2_train.jsonl"  # Path to the compiled dataset
   test_split: 0.1  # Fraction of data for testing
+  max_length: 2048  # Preserve long agentic evidence; batches are padded dynamically
 
 # Training Hyperparameters
 training:

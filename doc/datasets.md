@@ -40,6 +40,10 @@ training loader consumes only `messages`, and heterogeneous verification check
 values cannot be represented by one inferred Arrow schema.
 
 The current generated artifact contains all 980 rows from the seven sources.
+The active training configs use a 2,048-token limit, which contains the current
+longest row (1,823 tokens with the local Qwen tokenizer) without truncation.
+Batch padding remains dynamic, so shorter command examples retain their natural
+length until collation.
 
 There is no explicit train/validation/test split. `training/config.yaml`
 currently points to the classic 363-row dataset, while

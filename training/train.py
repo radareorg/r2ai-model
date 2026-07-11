@@ -28,6 +28,9 @@ from transformers import (
     TrainingArguments,
 )
 
+DEFAULT_MAX_LENGTH = 2048
+
+
 def load_config(config_path: str = "config.yaml"):
     """Load configuration from YAML file."""
     path = Path(config_path)
@@ -56,6 +59,7 @@ def _build_training_metadata(config, dataset_path: Path, final_model_path: Path)
         "dataset": {
             "path": str(dataset_path),
             "test_split": config['dataset'].get('test_split'),
+            "max_length": config['dataset'].get('max_length', DEFAULT_MAX_LENGTH),
         },
         "training": config.get("training"),
         "lora": config.get("lora"),
@@ -170,8 +174,12 @@ def setup_model_and_tokenizer(config):
 def load_and_prepare_dataset(config, tokenizer):
     """Load and prepare the dataset."""
     dataset_path = Path(config['dataset']['path'])
+    max_length = int(config['dataset'].get('max_length', DEFAULT_MAX_LENGTH))
+    if max_length <= 0:
+        raise ValueError("dataset.max_length must be greater than zero")
 
     print(f"Loading dataset from: {dataset_path}")
+    print(f"Maximum sequence length: {max_length}")
 
     # Load JSONL dataset
     dataset = load_dataset('json', data_files=str(dataset_path))
@@ -192,7 +200,7 @@ def load_and_prepare_dataset(config, tokenizer):
                     conversation += f"Assistant: {content}\n"
             texts.append(conversation)
 
-        return tokenizer(texts, truncation=True, padding='max_length', max_length=512)
+        return tokenizer(texts, truncation=True, padding=False, max_length=max_length)
 
     # Split dataset
     test_size = config['dataset']['test_split']

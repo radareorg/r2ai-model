@@ -65,6 +65,8 @@ Edit `config.yaml` to customize:
 
 - **Model**: Change `model.name` to any Hugging Face causal LM, or use `config.minicpm5.yaml` for `openbmb/MiniCPM5-1B`
 - **Training**: Adjust epochs, batch size, learning rate, etc.
+- **Dataset context**: Adjust `dataset.max_length` (default 2048); batches use
+  dynamic padding rather than padding every row to that limit
 - **Quantization**: Set GGUF quantization method
 - **Platform**: Configure CUDA/MPS settings
 - **LoRA**: Enable parameter-efficient fine-tuning

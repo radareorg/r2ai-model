@@ -43,7 +43,12 @@ model:
 
 dataset:
   path: "../data/training/radare2_all_agentic_train.jsonl"
+  max_length: 2048
 ```
+
+`max_length` defaults to 2048 tokens. Tokenized rows keep their natural
+length and are padded dynamically by the batch collator, so short examples do
+not pay the memory cost of the longest sequence in the full dataset.
 
 Useful model choices:
 
