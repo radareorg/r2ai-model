@@ -55,15 +55,14 @@ merge-agentic-dataset:
 	mkdir -p ../data/agentic-commands
 	touch ../data/agentic-commands/verified.jsonl
 	cd .. && ./memory.py export-training
-	cat \
+	python3 merge_datasets.py --output $(MERGED_DATASET) \
 		../data/radare2/radare2_train.jsonl \
 		../data/radare2-agentic/verified.jsonl \
 		../data/r2js/verified.jsonl \
 		../data/reasoning-long/verified.jsonl \
 		../data/agentic-knowledge/knowledge.jsonl \
 		../data/agentic-commands/verified.jsonl \
-		../data/memory/verified.jsonl \
-		> $(MERGED_DATASET)
+		../data/memory/verified.jsonl
 	@echo "Merged dataset written to $(MERGED_DATASET)."
 
 # Train the model with the classic compiled dataset.

@@ -20,16 +20,19 @@ Equivalent manual merge:
 
 ```sh
 mkdir -p data/training
-cat \
+python3 training/merge_datasets.py \
+  --output data/training/radare2_all_agentic_train.jsonl \
   data/radare2/radare2_train.jsonl \
   data/radare2-agentic/verified.jsonl \
   data/r2js/verified.jsonl \
   data/reasoning-long/verified.jsonl \
   data/agentic-knowledge/knowledge.jsonl \
   data/agentic-commands/verified.jsonl \
-  data/memory/verified.jsonl \
-  > data/training/radare2_all_agentic_train.jsonl
+  data/memory/verified.jsonl
 ```
+
+The merger validates each conversation and writes only the uniform `messages`
+field used by training. Source metadata remains in the individual datasets.
 
 Choose the model in a training config:
 
