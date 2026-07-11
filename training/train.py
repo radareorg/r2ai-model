@@ -173,6 +173,14 @@ def _resolve_dataset_path(config) -> Path:
     return dataset_path
 
 
+def _file_sha256(path: Path) -> str:
+    digest = sha256()
+    with open(path, "rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _build_training_metadata(config, dataset_path: Path, final_model_path: Path) -> dict:
     """Create a metadata snapshot to detect stale training artifacts."""
     dataset_stat = dataset_path.stat()
@@ -198,6 +206,7 @@ def _build_training_metadata(config, dataset_path: Path, final_model_path: Path)
         "dataset_path": str(dataset_path),
         "dataset_mtime": dataset_stat.st_mtime,
         "dataset_size": dataset_stat.st_size,
+        "dataset_sha256": _file_sha256(dataset_path),
         "config_fingerprint": config_fingerprint,
         "final_model_path": str(final_model_path.resolve()),
     }
@@ -232,7 +241,6 @@ def _metadata_matches(cached: dict, current: dict) -> bool:
         "model_name",
         "tokenizer",
         "dataset_path",
-        "dataset_mtime",
         "dataset_size",
         "config_fingerprint",
         "final_model_path",
@@ -240,6 +248,14 @@ def _metadata_matches(cached: dict, current: dict) -> bool:
     for key in required_keys:
         if cached.get(key) != current.get(key):
             return False
+    cached_dataset_hash = cached.get("dataset_sha256")
+    current_dataset_hash = current.get("dataset_sha256")
+    if cached_dataset_hash and current_dataset_hash:
+        if cached_dataset_hash != current_dataset_hash:
+            return False
+    elif cached.get("dataset_mtime") != current.get("dataset_mtime"):
+        # Backward compatibility for metadata written before dataset hashes.
+        return False
     final_model_path = Path(cached["final_model_path"])
     return _final_model_is_complete(final_model_path)
 
@@ -260,6 +276,44 @@ def _latest_mtime_in_directory(path: Path) -> float:
         if file.is_file():
             latest = max(latest, file.stat().st_mtime)
     return latest
+
+
+def _remove_model_weight_artifacts(path: Path) -> None:
+    """Remove weight files from an earlier save without touching other output."""
+    path.mkdir(parents=True, exist_ok=True)
+    patterns = (
+        "model*.safetensors",
+        "model*.safetensors.index.json",
+        "pytorch_model*.bin",
+        "pytorch_model*.bin.index.json",
+    )
+    for pattern in patterns:
+        for artifact in path.glob(pattern):
+            artifact.unlink()
+
+
+def _remove_stale_safetensors_index(path: Path) -> None:
+    """Prefer a complete aggregate when an old shard index is inconsistent."""
+    aggregator = path / "model.safetensors"
+    index_path = path / "model.safetensors.index.json"
+    if not aggregator.is_file() or not index_path.is_file():
+        return
+
+    try:
+        index = json.loads(index_path.read_text())
+        referenced = set(index.get("weight_map", {}).values())
+    except (OSError, json.JSONDecodeError):
+        referenced = set()
+    missing = sorted(name for name in referenced if not (path / name).is_file())
+    if referenced and not missing:
+        return
+
+    index_path.unlink()
+    for shard in path.glob("model-*.safetensors"):
+        shard.unlink()
+    reason = "is invalid" if not referenced else f"references {len(missing)} missing shard(s)"
+    print(f"Removed stale model.safetensors.index.json; it {reason}.")
+
 
 def setup_tokenizer(config):
     """Load and validate the tokenizer required by the dataset pipeline."""
@@ -501,9 +555,11 @@ def train_model(config, model, tokenizer, dataset):
         tokenizer.save_pretrained(adapter_path)
         print(f"LoRA adapter saved to: {adapter_path}")
         merged_model = trainer.model.merge_and_unload()
+        _remove_model_weight_artifacts(Path(final_model_path))
         merged_model.save_pretrained(final_model_path, safe_serialization=True)
         print(f"Merged inference model saved to: {final_model_path}")
     else:
+        _remove_model_weight_artifacts(Path(final_model_path))
         trainer.save_model(final_model_path)
     tokenizer.save_pretrained(final_model_path)
 
@@ -512,7 +568,9 @@ def train_model(config, model, tokenizer, dataset):
 def export_to_gguf(config, model_path: Path) -> Optional[Path]:
     """Export model to GGUF format using llama.cpp."""
     final_model_path = Path(model_path)
-    output_name = config['export']['output_name']
+    output_name = Path(config['export']['output_name'])
+    if not output_name.is_absolute():
+        output_name = Path(config['_config_path']).parent / output_name
     gguf_path = Path(f"{output_name}.gguf").resolve()
     model_mtime = _latest_mtime_in_directory(final_model_path)
 
@@ -529,6 +587,7 @@ def export_to_gguf(config, model_path: Path) -> Optional[Path]:
         print(f"Error: convert_hf_to_gguf.py not found at {convert_script}")
         return None
 
+    _remove_stale_safetensors_index(final_model_path)
     aggregator = final_model_path / "model.safetensors"
     shards = list(final_model_path.glob("model-*.safetensors"))
     temp_aggregator: Optional[Path] = None
@@ -635,7 +694,7 @@ def main():
     if cached_metadata and _metadata_matches(cached_metadata, current_metadata):
         reuse_trained_model = True
         reuse_reason = "No configuration or dataset changes detected"
-        metadata = dict(cached_metadata)
+        metadata = {**cached_metadata, **current_metadata}
         final_model_path = Path(metadata['final_model_path'])
     elif cached_metadata is None and _final_model_is_complete(final_model_dir):
         model_mtime = _latest_mtime_in_directory(final_model_dir)
@@ -675,13 +734,14 @@ def main():
     # Export based on platform and config
     if config['export']['gguf']:
         gguf_path = export_to_gguf(config, final_model_path)
-        if gguf_path:
-            metadata['gguf_path'] = str(gguf_path)
-            try:
-                metadata['gguf_mtime'] = Path(gguf_path).stat().st_mtime
-            except OSError:
-                pass
-            _write_metadata(metadata_path, metadata)
+        if not gguf_path:
+            raise RuntimeError("GGUF export was requested but did not complete")
+        metadata['gguf_path'] = str(gguf_path)
+        try:
+            metadata['gguf_mtime'] = Path(gguf_path).stat().st_mtime
+        except OSError:
+            pass
+        _write_metadata(metadata_path, metadata)
 
     if config['export']['mlx']:
         export_to_mlx(config, final_model_path)
