@@ -7,31 +7,29 @@ This repository currently has two parallel dataset systems:
 2. A verified agentic JSONL pipeline for executable examples, source-grounded
    knowledge, command grammar, long-form reasoning, and human corrections.
 
-The inventory below describes the current worktree. Generated row counts may
-change after running the agentic, memory, review, or merge commands.
+Use `r2ai-model datasets` for live row counts and merged-data freshness.
 
 ## Active training datasets
 
 The default training workflow merges these eight files:
 
-| Dataset | Rows | Review or evidence gate |
-| --- | ---: | --- |
-| `data/radare2/function_calling_r2cmd_dataset.jsonl` | 363 | Deterministic conversion of the classic accepted commands; not separately executed |
-| `data/radare2/radare2_train.jsonl` | 363 | Compiled from the legacy accepted TSV; malformed rows are skipped |
-| `data/radare2-agentic/verified.jsonl` | 10 | Command execution and declared checks pass on local fixtures |
-| `data/r2js/verified.jsonl` | 5 | Local r2js execution and checks pass |
-| `data/reasoning-long/verified.jsonl` | 4 | Local multi-command execution and checks pass |
-| `data/agentic-knowledge/knowledge.jsonl` | 388 | Mixed executable, source-scan checked, and source-grounded knowledge |
-| `data/agentic-commands/verified.jsonl` | 3,061 | Exact current `?*` help: 1,961 trusted individual rows, 364 scoped family chunks, 298 intent-selection rows, 402 focused command lessons, and 36 verified workflow variants |
-| `data/memory/verified.jsonl` | 10 | Direct human corrections exported from accepted memory records |
-| **Current source total** | **4,204** | Expected result of a fresh merge |
+| Dataset | Review or evidence gate |
+| --- | --- |
+| `data/radare2/function_calling_r2cmd_dataset.jsonl` | Deterministic conversion of the classic accepted commands; not separately executed |
+| `data/radare2/radare2_train.jsonl` | Compiled from the legacy accepted TSV; malformed rows are skipped |
+| `data/radare2-agentic/verified.jsonl` | Command execution and declared checks pass on local fixtures |
+| `data/r2js/verified.jsonl` | Local r2js execution and checks pass |
+| `data/reasoning-long/verified.jsonl` | Local multi-command execution and checks pass |
+| `data/agentic-knowledge/knowledge.jsonl` | Mixed executable, source-scan checked, and source-grounded knowledge |
+| `data/agentic-commands/verified.jsonl` | Current help evidence, trusted family/selection rows, and verified focused workflows |
+| `data/memory/verified.jsonl` | Direct human corrections exported from accepted memory records |
 
 The merge validates every conversation and writes a uniform training-only row
 containing `messages` and optional `tools`. It does not shuffle, split, or
 deduplicate across the eight sources. Rebuild it with:
 
 ```sh
-make -C training merge-agentic-dataset
+r2ai-model merge
 ```
 
 Source identifiers, provenance, and verification details remain in the source
@@ -40,9 +38,9 @@ training loader consumes only `messages` and optional `tools`, and
 heterogeneous verification check values cannot be represented by one inferred
 Arrow schema.
 
-The current generated artifact contains all 4,204 rows from the eight sources.
-The active training configs use a 2,048-token limit, which contains the current
-longest row (1,836 tokens with the local Qwen chat template) without truncation.
+Inspect the current generated artifact with `r2ai-model datasets`. The active
+training configs use a 2,048-token limit, and preflight fails if rows are not
+compatible with the selected tokenizer and template.
 Batch padding remains dynamic, so shorter command examples retain their natural
 length until collation.
 At preprocessing time, the selected tokenizer's native chat template renders
@@ -83,60 +81,50 @@ promotion paths are:
 | Classic tool calls | `r2cmd.py` converts each classic command | Deterministic schema conversion; no r2 execution | Inherits classic acceptance | Tool name and structured command argument are valid |
 | Fixed agentic seeds | Humans author `seeds.json` or `tasks.json` | radare2/r2js runs locally and every declared check passes | Failures may enter `pending-human.jsonl` | Verification succeeds |
 | Agentic knowledge | Deterministic source/doc/test scanners, experiments, optional online collection, and accepted human answers | ID/content dedupe, quality filters, category caps; executable rows run checks | Pending answers are recorded in `human-responses.jsonl` | The builder promotes it to the aggregate; not every row has executable evidence |
-| Command grammar | Current local `?*`, scoped help parsing, prefix relationships, and checked knowledge workflows | Full-help anti-truncation gate, exact evidence, unique IDs, role validation, and successful help checks | Memory answers can replace thin descriptions | Status is `documented` or `human-reviewed`; 39 `needs-memory` rows are withheld |
+| Command grammar | Current local `?*`, scoped help parsing, prefix relationships, and checked knowledge workflows | Full-help anti-truncation gate, exact evidence, unique IDs, role validation, and successful help checks | Memory answers can replace thin descriptions | Status is `documented` or `human-reviewed`; `needs-memory` rows are withheld |
 | Human memory | A person answers a queued topic or records a correction | JSON/schema, fingerprint, and duplicate handling; no factual verifier | The submitter is the review authority | Memory status is accepted and `memory.py export-training` runs |
 | AI proposals | `agentic-dataset.py propose` calls an OpenAI-compatible model | JSON parsing only | None in the proposal command itself | Never automatically; `ai-proposals.jsonl` is currently disconnected from promotion |
 
-`make agentic` is primarily deterministic and local. Optional AI is used to
+`r2ai-model learn` is primarily deterministic and local. Optional AI is used to
 draft proposal rows or better questions for humans; those outputs are not a
 trusted answer source by themselves. The legacy `generate-dataset.py` and
 `enrich-dataset.py` paths can call external models, but the normal compile target
 does not invoke them: it rebuilds from the existing accepted/enriched files.
 
-The agentic knowledge aggregate currently contains 203 rows with successful
-executable checks, 6 with `source-scan-ok`, and 140 without machine-verification
-metadata. Two aggregate rows are tagged `human-review`. The 9 human-memory rows
+The agentic knowledge aggregate mixes executable checks, source scans, and
+source-grounded rows without machine-verification metadata. Human-memory rows
 are a separate, explicitly human-authored source. This distinction matters:
 valid JSON and provenance are not the same as factual or executable validation.
 
-Current human-review state is 314 pending memory topics and 7 answered topics,
-plus the curated agentic review queues. The command builder reduced its withheld
-set from 185 of 240 rows to 39 of 1,971 rows by trusting exact help behavior
-without guessing unresolved letter meanings.
+Use `r2ai-model status` for current review and dataset counts; these queues
+change whenever command knowledge or human memory is refreshed.
 
 ## Training and model compatibility
 
-The public workflows are:
+The self-contained public workflow is:
 
 ```sh
-make train
-make chat
-
-# The installed/source CLI is the preferred interface.
-r2ai-model datasets --check
-r2ai-model merge
 r2ai-model train --preset qwen
 r2ai-model chat --preset qwen
 ```
 
-`make train` and `r2ai-model train --preset qwen` create/update the venv, repair compatible
+`train` creates or updates the venv, repairs compatible
 dependencies, rebuild classic and tool-call rows, export human memory, merge all
 training-ready sources, train with LoRA by default, merge the adapter into a
-complete model, and export GGUF. `make chat` and `r2ai-model chat` import the
-default GGUF into Ollama and start the session. The default chat filename now
-matches the default Qwen config output.
+complete model, and export GGUF. A separate merge is not required. `chat`
+imports the preset's GGUF into Ollama and starts the session.
 
 Before downloading model weights or starting an expensive run, validate a
 config's tokenizer and every dataset row:
 
 ```sh
-r2ai-model preflight
-r2ai-model preflight --config config.minicpm5.yaml
-r2ai-model preflight --config config.lfm2.5.yaml
+r2ai-model preflight --preset qwen
+r2ai-model preflight --preset minicpm5
+r2ai-model preflight --preset lfm25
 ```
 
-The current 4,204-row corpus passes full preflight with the default Qwen config;
-run the same preflight after changing either alternative model dependency set.
+Run preflight after changing a dataset, tokenizer, template, or model dependency
+set.
 The included model configurations are:
 
 | Config | Model | Parameters | Full template preflight | Intended strength |
@@ -397,10 +385,9 @@ verification. Human-reviewed rows can also have `memory_refs` and
 
 `data/memory/` stores corrections and clarifications supplied by humans:
 
-* `topics.jsonl`: 321 clarification topics, currently 314 pending and 7
-  answered.
-* `memory.jsonl`: 9 accepted source memories.
-* `verified.jsonl`: 9 exported chat-format training rows.
+* `topics.jsonl`: clarification topics and their review status.
+* `memory.jsonl`: accepted source memories.
+* `verified.jsonl`: exported chat-format training rows.
 
 A source memory contains a concise `highlight`, detailed explanation, tags,
 the original question, source channel, status, timestamps, content fingerprint,
@@ -410,7 +397,7 @@ retains the training conversation and provenance.
 Rebuild the training export with:
 
 ```sh
-make memory-export
+r2ai-model export
 ```
 
 ## Agentic human review

@@ -12,12 +12,12 @@ The generated block is delimited by:
 <!-- agentic-r2bugs:end -->
 ```
 
-Keep manual notes outside those markers. `make agentic` may rewrite everything
+Keep manual notes outside those markers. `r2ai-model learn` may rewrite everything
 inside the generated block.
 
-## How `make agentic` Finds Leads
+## How `r2ai-model learn` Finds Leads
 
-During `make agentic`, `agentic-dataset.py build --skip-seeds` calls the
+During `r2ai-model learn`, `agentic-dataset.py build --skip-seeds` calls the
 agentic knowledge builder. Before writing new knowledge rows, it runs the source
 bug-hunt report generator and updates `R2BUGS.md`.
 
@@ -58,10 +58,10 @@ back into training data.
 
 ```sh
 # refresh knowledge and regenerate R2BUGS.md
-make agentic
+r2ai-model learn
 
 # scan a specific radare2 checkout
-R2_SOURCE=../radare2 make agentic
+r2ai-model learn --r2-source ../radare2
 
 # inspect generated report changes
 git diff -- R2BUGS.md

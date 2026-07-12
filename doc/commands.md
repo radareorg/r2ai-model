@@ -1,16 +1,20 @@
-# Agentic Commands
+# Command Curriculum
 
-`make agentic-commands` builds a reusable radare2 command grammar dataset. It
-executes the installed radare2 `?*` help, refreshes the full help snapshot, and
-writes evidence-backed command, modifier, command-family, and memory rows.
+`r2ai-model refresh-commands` rebuilds the radare2 command training source. It
+does not list commands, merge datasets, or train a model. The older
+`r2ai-model commands` name remains as an alias.
+
+The refresh executes installed radare2 `?*` and focused help, checks executable
+workflows, and writes evidence-backed command, family, selection, focused, and
+workflow rows.
 
 ```sh
-make agentic-commands
-make memory
-make agentic-commands
+r2ai-model refresh-commands
+r2ai-model review memory
+r2ai-model refresh-commands
 ```
 
-The second `make agentic-commands` run folds accepted `make memory` answers
+The second refresh folds accepted memory answers
 back into the command database. Matching rows become `human-reviewed`, include a
 `Human memory:` section, and are exported into the training JSONL. Answered
 memory topics are not queued again.
@@ -36,10 +40,10 @@ Files:
 * `data/agentic-commands/memory-topics.jsonl`: questions generated from weak
   command explanations and command usage mined from the knowledge database.
 * `data/agentic-commands/knowledge-memory-topics.jsonl`: questions that
-  `make agentic` mined from existing `data/agentic-knowledge/knowledge.jsonl`
+  `r2ai-model learn` mined from existing `data/agentic-knowledge/knowledge.jsonl`
   workflow rows.
-* `data/memory/topics.jsonl`: queued questions consumed by `make memory` or
-  `make agentic-memory-file`.
+* `data/memory/topics.jsonl`: queued questions consumed by `r2ai-model review`
+  or `r2ai-model answer`.
 
 The command rows keep exact syntax and evidence lines separate from inferred
 letter meanings. Unknown letters no longer make authoritative help unusable,
@@ -59,19 +63,19 @@ checks. Command help follows the active installed radare2. Executable workflows
 prefer the source-tree build so the executable and libraries have matching
 ABIs; a workflow can explicitly require the active build when it verifies newer
 behavior. Set
-`AGENTIC_COMMANDS_ARGS="--memory-limit 0 --no-queue-memory"` when refreshing the
-dataset without changing the human-review queue.
+Use `--memory-limit 0 --no-queue-memory` when refreshing without generating or
+queuing human-review questions.
 
 AI support is optional. With `OPENAI_API_KEY` set, the command builder can ask an
 OpenAI-compatible model for better human-memory questions about weak rows:
 
 ```sh
-AGENTIC_COMMANDS_AI=auto make agentic-commands
-AGENTIC_COMMANDS_AI=required OPENAI_MODEL=gpt-4o make agentic-commands
+r2ai-model refresh-commands --ai auto
+r2ai-model refresh-commands --ai required --model gpt-4o
 ```
 
 Offline mode still works and uses deterministic heuristics:
 
 ```sh
-AGENTIC_COMMANDS_AI=off make agentic-commands
+r2ai-model refresh-commands --ai off
 ```

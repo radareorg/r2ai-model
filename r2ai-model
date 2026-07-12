@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Friendly command-line front door for r2ai-model workflows."""
+"""Build and review radare2 datasets, fine-tune models, and run exported GGUFs."""
 
 from __future__ import annotations
 
@@ -47,18 +47,41 @@ PRESETS = {
 INTERNAL_ARGS = {"command", "func", "action", "extra", "full", "preset", "create_only"}
 
 EXAMPLES = """
-Common workflows:
+Data flow:
+  refresh-commands / learn / review  -> source JSONL datasets
+  merge                              -> one merged training JSONL
+  train                              -> compile + merge + fine-tune + GGUF
+  chat / serve                       -> use the GGUF
+
+Important:
+  `train` already compiles and merges. Run `merge` only to refresh the combined
+  JSONL without training. `preflight` is an optional, recommended validation
+  that also compiles and merges but does not load model weights.
+
+Examples:
   r2ai-model status
   r2ai-model datasets --check
-  r2ai-model commands --ai off --no-queue-memory
+  r2ai-model refresh-commands --ai off --no-queue-memory
   r2ai-model review
-  r2ai-model merge
   r2ai-model preflight --preset qwen
-  r2ai-model train --preset minicpm5
+  r2ai-model train --preset qwen
   r2ai-model chat --preset qwen
-  r2ai-model serve --preset qwen --port 8080
-  r2ai-model help commands
+  r2ai-model help refresh-commands
 """.strip()
+
+DETAILS = {
+    "refresh-commands": "Read installed radare2 help (`?*` and focused help), verify workflows, "
+        "and rebuild data/agentic-commands/*.jsonl. This changes a source dataset; it does not merge or fine-tune.",
+    "learn": "Discover and verify broader radare2 knowledge, update data/agentic-knowledge/knowledge.jsonl, "
+        "and write an audit shard. This does not merge or fine-tune.",
+    "compile": "Regenerate only the legacy chat and tool-call sources. Merge, preflight, and train already do this.",
+    "merge": "Compile legacy sources, export memory, and combine all training-ready JSONL. "
+        "This does not tokenize, load model weights, or fine-tune.",
+    "preflight": "Optional safety check that compiles and merges, then validates every row with the selected "
+        "tokenizer and chat template without loading model weights.",
+    "train": "Self-contained fine-tuning: install dependencies, compile, export memory, merge, fine-tune, "
+        "merge LoRA, and export GGUF. Separate merge and preflight runs are optional.",
+}
 
 
 def find_root(start: Path) -> Path | None:
@@ -434,20 +457,35 @@ def build_parser() -> argparse.ArgumentParser:
     next_parser.add_argument("--format", choices=["text", "json"], default="text")
     next_parser.set_defaults(func=cmd_memory, action="next")
 
-    commands = sub.add_parser("commands", help="refresh command help and build command/workflow datasets")
+    commands = sub.add_parser(
+        "refresh-commands",
+        aliases=["commands"],
+        help="rebuild the radare2 command training source (`commands` alias)",
+        description=DETAILS["refresh-commands"],
+    )
     add_r2_options(commands)
     commands.add_argument("--limit", type=int)
     commands.add_argument("--variants-per-block", type=int)
     commands.add_argument("--family-chunk-size", type=int)
-    commands.add_argument("--memory-limit", type=int)
-    commands.add_argument("--queue-memory", action=argparse.BooleanOptionalAction, default=True)
-    commands.add_argument("--ai", choices=["auto", "off", "required"], default="")
-    commands.add_argument("--model", default="")
+    commands.add_argument("--memory-limit", type=int, help="maximum clarification topics; 0 disables generation")
+    commands.add_argument(
+        "--queue-memory",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="add generated clarification topics to the human review queue",
+    )
+    commands.add_argument(
+        "--ai",
+        choices=["auto", "off", "required"],
+        default="",
+        help="optional AI assistance for clarification questions",
+    )
+    commands.add_argument("--model", default="", help="AI model used only for clarification questions")
     commands.add_argument("--temperature", type=float)
     add_extra(commands)
     commands.set_defaults(func=cmd_agentic, action="commands")
 
-    learn = sub.add_parser("learn", help="discover and register agentic knowledge")
+    learn = sub.add_parser("learn", help="grow the verified agentic knowledge source dataset", description=DETAILS["learn"])
     learn.add_argument("--full", action="store_true", help="also verify fixed seeds")
     add_build_options(learn)
     learn.set_defaults(func=cmd_agentic, action="build")
@@ -481,7 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_extra(propose)
     propose.set_defaults(func=cmd_agentic, action="propose")
 
-    review = sub.add_parser("review", help="review memory, agentic, or legacy pending rows")
+    review = sub.add_parser(
+        "review",
+        help="review memory, agentic, or legacy pending rows",
+        description="Record human decisions in source queues and memory. This does not merge or fine-tune.",
+    )
     review.add_argument("queue", nargs="?", choices=["auto", "memory", "agentic", "legacy"], default="auto")
     review.add_argument("--list", action="store_true")
     review.add_argument("--all", action="store_true", help="include completed memory topics")
@@ -490,24 +532,28 @@ def build_parser() -> argparse.ArgumentParser:
     review.set_defaults(func=cmd_review)
 
     for name, action, help_text in (
-        ("compile", "compile-dataset", "compile classic dataset sources"),
-        ("merge", "merge-agentic-dataset", "merge every training-ready dataset"),
+        ("compile", "compile-dataset", "rebuild only the classic dataset sources"),
+        ("merge", "merge-agentic-dataset", "build one JSONL from all training sources"),
     ):
-        item = sub.add_parser(name, help=help_text)
+        item = sub.add_parser(name, help=help_text, description=DETAILS[name])
         if name == "merge":
             item.add_argument("--output", default="", help="merged JSONL path relative to training/")
         item.set_defaults(func=cmd_dataset_task, action=action)
 
-    datasets = sub.add_parser("datasets", help="show source inventory and merged-dataset freshness")
+    datasets = sub.add_parser(
+        "datasets",
+        help="show source inventory and merged-dataset freshness",
+        description="Read-only inventory of merge inputs and the generated merged JSONL.",
+    )
     datasets.add_argument("--format", choices=["text", "json"], default="text")
     datasets.add_argument("--check", action="store_true", help="fail if a source is missing or the merge is stale")
     datasets.set_defaults(func=cmd_datasets)
 
     for name, action, help_text in (
-        ("preflight", "preflight", "merge and validate data without loading model weights"),
-        ("train", "train", "merge, fine-tune, and export the selected model"),
+        ("preflight", "preflight", "compile, merge, and validate without model weights"),
+        ("train", "train", "compile, merge, fine-tune, and export GGUF"),
     ):
-        item = sub.add_parser(name, help=help_text)
+        item = sub.add_parser(name, help=help_text, description=DETAILS[name])
         add_preset(item)
         item.add_argument("--merged-dataset", default="")
         item.set_defaults(func=cmd_model_task, action=action)

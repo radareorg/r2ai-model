@@ -1,22 +1,38 @@
 # Training
 
-Build one training JSONL from the classic dataset, verified companion datasets,
-the agentic knowledge aggregate, and exported human memory rows:
+The shortest fine-tuning workflow is one command:
 
 ```sh
-make agentic-verify
-make agentic-commands
-make memory-export
-make -C training merge-agentic-dataset
+r2ai-model train --preset qwen
 ```
 
-The merge target writes:
+`train` creates or updates the environment, installs dependencies, recompiles
+classic sources, exports accepted memory, merges all training sources,
+fine-tunes, merges LoRA, and exports GGUF. Running `merge` first is unnecessary.
+
+Preflight is optional but recommended after dataset or template changes:
+
+```sh
+r2ai-model preflight --preset qwen
+r2ai-model train --preset qwen
+```
+
+Both commands compile and merge. Preflight stops after tokenizer and chat
+template validation without loading model weights.
+
+To build only the combined JSONL without training:
+
+```sh
+r2ai-model merge
+```
+
+The merge writes:
 
 ```text
 data/training/radare2_all_agentic_train.jsonl
 ```
 
-Equivalent manual merge:
+Equivalent manual merge for debugging the machinery:
 
 ```sh
 mkdir -p data/training
@@ -94,15 +110,12 @@ r2ai-model preflight --preset minicpm5
 Train the default model, including dependency setup, merge, and GGUF export:
 
 ```sh
-make train
 r2ai-model train --preset qwen
 ```
 
 Alternative included configs:
 
 ```sh
-make -C training train-minicpm5
-make -C training train-lfm25
 r2ai-model train --preset minicpm5
 r2ai-model train --preset lfm25
 ```
@@ -114,21 +127,18 @@ MiniCPM5 uses the standard Llama causal-LM architecture, but its model card reco
 Use the default GGUF with Ollama:
 
 ```sh
-make chat
 r2ai-model chat --preset qwen
 ```
 
 Use a specific GGUF from disk:
 
 ```sh
-make -C training chat MODEL=radare2-qwen3-4b-finetuned.gguf OLLAMA_MODEL=r2ai-qwen3
 r2ai-model chat --preset qwen --name r2ai-qwen3
 ```
 
 Serve the same file with llama.cpp's OpenAI-compatible server:
 
 ```sh
-make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf LLAMA_PORT=8080
 r2ai-model serve --preset qwen --port 8080
 ```
 

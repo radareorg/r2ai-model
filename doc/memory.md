@@ -1,6 +1,6 @@
 # Memory
 
-`make memory` and `r2ai-model play` are the human clarification loop. It is
+`r2ai-model review memory` and `r2ai-model play` are the human clarification loop. It is
 intentionally transport neutral: the terminal, a DeltaChat bot, a PicoClaw
 agent, or an Ollama wrapper can all call the same CLI and write the same JSONL
 files.
@@ -8,22 +8,14 @@ files.
 ## Commands
 
 ```sh
-make memory
-make agentic-memory
-make agentic-memory MEMORY_FORMAT=json
-make agentic-memory-file < answer.json
-make agentic-memory-file FILE=answer.json
-make memory-list
-make memory-export
-make memory-add TOPIC="radare2 ESIL stepping" QUESTION="How should 3aes be explained?" TAGS="radare2,esil"
-make memory-remember TOPIC="radare2 ESIL stepping" HIGHLIGHT="3aes repeats aes three times" DETAILS="In radare2 a numeric prefix repeats the following command. aes is analysis/esil/step, so 3aes performs three ESIL steps." TAGS="radare2,esil"
-make install
 r2ai-model play
 r2ai-model review memory
 r2ai-model review memory --list
 r2ai-model next --format json
 r2ai-model answer < answer.json
 r2ai-model answer --file answer.json
+r2ai-model list --all
+r2ai-model export
 r2ai-model queue "radare2 ESIL stepping" --question "How should 3aes be explained?" --tags "radare2,esil"
 r2ai-model remember --topic "radare2 ESIL stepping" --highlight "3aes repeats aes three times" --details "In radare2 a numeric prefix repeats the following command. aes is analysis/esil/step, so 3aes performs three ESIL steps." --tags "radare2,esil"
 ```
@@ -44,13 +36,10 @@ External agents can use the non-interactive protocol:
 r2ai-model next --format json > question.json
 r2ai-model answer < answer.json
 r2ai-model answer --file answer.json
-make agentic-memory MEMORY_FORMAT=json > question.json
-make agentic-memory-file < answer.json
-make agentic-memory-file FILE=answer.json
 ```
 
-`r2ai-model next --format json` and `make agentic-memory MEMORY_FORMAT=json`
-print the next pending topic, the exact question, tags, source metadata, a JSON
+`r2ai-model next --format json` prints the next pending topic, the exact
+question, tags, source metadata, a JSON
 answer template, and the submit commands. The answer
 payload must be JSON:
 
@@ -63,8 +52,8 @@ payload must be JSON:
 }
 ```
 
-`r2ai-model answer` and `make agentic-memory-file` accept one JSON object or a
-list of objects. They read from stdin by default, or from an answer file, mark
+`r2ai-model answer` accepts one JSON object or a list of objects. It reads from
+stdin by default, or from an answer file, marks
 topics answered, write
 `data/memory/memory.jsonl`, and refresh `data/memory/verified.jsonl`.
 

@@ -1,77 +1,77 @@
 # Agent Commands
 
-Basic workflow for this repository:
+Use `r2ai-model` as the primary interface. Run these first when orientation is
+needed:
 
 ```sh
-# discover root and lower-level training targets
-make help
-make -C training help
 r2ai-model help
-
-# install the agent-facing CLI into /usr/local/bin
-make install
 r2ai-model status
+r2ai-model datasets
+```
 
-# discover/register new agentic knowledge
-make agentic
-r2ai-model learn
+The data flow is:
 
-# verify registered executable knowledge
-make agentic-verify
-r2ai-model verify
+```text
+source datasets -> merge -> preflight (optional) -> train -> GGUF -> chat/serve
+```
 
-# build command grammar rows and queue command-memory questions
-make agentic-commands
-r2ai-model commands
+`train` already compiles and merges. The shortest fine-tuning workflow is:
 
-# answer or drop pending human-review rows
-make agentic-pending
-r2ai-model pending
-r2ai-model review
+```sh
+r2ai-model train --preset qwen
+```
 
-# collect human corrections interactively or through JSON batch mode
-make memory
-make agentic-memory
-make agentic-memory-file < answer.json
-r2ai-model play
-r2ai-model next --format json
-r2ai-model answer < answer.json
-make memory-export
+Use preflight before an expensive run when source data or model templates
+changed:
 
-# validate templates, then install deps, merge all data, train, and export GGUF
-make preflight
-make train
-r2ai-model datasets --check
-r2ai-model merge
+```sh
 r2ai-model preflight --preset qwen
 r2ai-model train --preset qwen
-
-# train MiniCPM5 against the merged agentic dataset
-make -C training train-minicpm5
-r2ai-model train --preset minicpm5
-
-# chat with the default trained GGUF through Ollama
-make chat
-r2ai-model chat
-
-# serve a trained GGUF through llama.cpp
-make serve
-r2ai-model serve
 ```
 
-Before custom training, set the config:
+Source-dataset growth is separate and optional:
 
-```yaml
-dataset:
-  path: "../data/training/radare2_all_agentic_train.jsonl"
-model:
-  name: "Qwen/Qwen2.5-3B-Instruct"
-  tokenizer: null
+```sh
+r2ai-model refresh-commands --ai off --no-queue-memory
+r2ai-model learn
+r2ai-model verify
+r2ai-model review
 ```
 
-Keep generated bug leads in `R2BUGS.md` out of training data unless they are
-manually confirmed and converted into a reviewed training row.
+`refresh-commands` rebuilds command training rows from radare2 help and verified
+workflows; it does not list commands or train a model. `commands` is retained as
+an alias. `learn` grows broader agentic knowledge. `review` records human
+decisions and corrections.
 
-Human corrections collected with `make memory` are stored in
-`data/memory/memory.jsonl` and exported to `data/memory/verified.jsonl`. The
-agentic training merge includes that export.
+Batch agents can process memory questions through JSON:
+
+```sh
+r2ai-model next --format json > question.json
+r2ai-model answer < answer.json
+```
+
+Use trained artifacts with:
+
+```sh
+r2ai-model chat --preset qwen
+r2ai-model serve --preset qwen --port 8080
+```
+
+Alternative presets are `minicpm5` and `lfm25`. Custom configs are relative to
+`training/` unless absolute:
+
+```sh
+r2ai-model train --config custom.yaml
+```
+
+Keep generated bug leads in `R2BUGS.md` out of training unless manually
+confirmed and converted into reviewed rows. Train from aggregate knowledge and
+verified files, not `runs/*.jsonl` audit shards. Do not commit virtual
+environments, merged datasets, output directories, or GGUF files.
+
+Makefiles remain compatibility and automation layers:
+
+```sh
+make help
+make -C training help
+```

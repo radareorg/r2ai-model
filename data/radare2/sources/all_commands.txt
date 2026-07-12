@@ -1493,8 +1493,8 @@ Usage: C[-LCvsdfm*?][*?] [...]   # Metadata management
 | Ch[-] [size] [@addr]                           hide data
 | Cm[-] [sz] [fmt..] [@addr]                     magic parse (see pm?)
 | Cs[?] [-] [size] [@addr]                       add string
-| Ct[?] [-] [comment-text] [@addr]               add/remove type analysis comment
-| Ct.[@addr]                                     show comment at current or specified address
+| Ct[?*j,=.-] [annotation] [@addr]               manage type analysis annotations
+| Ct.[@addr]                                     show type analysis annotation at current or specified address
 | Cv[?][bsr]                                     add comments to args
 Usage: CC[-+!*au] [base64:..|str] @ addr
 | CC!                     edit comment using cfg.editor (vim, ..)
@@ -1537,11 +1537,6 @@ Usage: Cs[ga-*.] ([size]) [@addr]
 | Csw [size] ([@addr])     add wide string (utf16)
 | Csz [size] ([@addr])     define zero terminated strings (with size as maxlen)
 | Css ([range]) ([@addr])  define all strings found in given range or section
-Usage: Ct [.|-] [@ addr]   # Manage comments for variable types
-| Ct                                    list all variable type comments
-| Ct [base64:..|comment-text] [@ addr]  place comment at current or specified address
-| Ct. [@ addr]                          show comment at current or specified address
-| Ct- [@ addr]                          remove comment at current or specified address
 See Cvb?, Cvs? and Cvr?
 Usage: d   # Debug commands
 | d:[?] [cmd]              run custom debug plugin command
