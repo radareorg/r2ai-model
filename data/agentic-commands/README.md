@@ -7,7 +7,15 @@ iterators, backticks, and command-line composition.
 Files:
 
 * `commands.jsonl`: source command database.
-* `verified.jsonl`: chat-format training export.
+* `families.jsonl`: chunked command-family help with command, modifier, and
+  context-local scope labels.
+* `selection.jsonl`: balanced documented-task-to-command examples.
+* `verified.jsonl`: trusted chat-format command and family training export.
 * `memory-topics.jsonl`: clarification questions generated from weak command
   rows and queued into `data/memory/topics.jsonl` when requested.
-* `index.json`: row counts and generation metadata.
+* `index.json`: row counts, quality-gate metrics, workflow linkage, and the
+  current `?*` snapshot hash.
+
+The full sanitized help snapshot is stored at
+`../radare2/sources/all_commands.txt`. AI may propose better questions for the
+human queue, but raw AI answers are not promoted into `verified.jsonl`.

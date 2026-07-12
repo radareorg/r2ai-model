@@ -40,10 +40,13 @@ KNOWLEDGE_PENDING_PATH = KNOWLEDGE_DIR / "pending-human.jsonl"
 KNOWLEDGE_INDEX_PATH = KNOWLEDGE_DIR / "index.json"
 COMMANDS_DIR = ROOT / "data" / "agentic-commands"
 COMMANDS_DB_PATH = COMMANDS_DIR / "commands.jsonl"
+COMMANDS_FAMILIES_PATH = COMMANDS_DIR / "families.jsonl"
+COMMANDS_SELECTION_PATH = COMMANDS_DIR / "selection.jsonl"
 COMMANDS_TRAINING_PATH = COMMANDS_DIR / "verified.jsonl"
 COMMANDS_INDEX_PATH = COMMANDS_DIR / "index.json"
 COMMANDS_MEMORY_TOPICS_PATH = COMMANDS_DIR / "memory-topics.jsonl"
 COMMANDS_KNOWLEDGE_TOPICS_PATH = COMMANDS_DIR / "knowledge-memory-topics.jsonl"
+COMMAND_HELP_SNAPSHOT_PATH = ROOT / "data" / "radare2" / "sources" / "all_commands.txt"
 MEMORY_TOPICS_PATH = ROOT / "data" / "memory" / "topics.jsonl"
 MEMORY_PATH = ROOT / "data" / "memory" / "memory.jsonl"
 HUMAN_RESPONSES_PATH = ROOT / "data" / "agentic-review" / "human-responses.jsonl"
@@ -180,6 +183,17 @@ def pick_r2_bin(explicit: str | None = None) -> Path:
         if found:
             return Path(found)
     raise SystemExit("Cannot find radare2. Set R2_BIN=/path/to/radare2.")
+
+
+def pick_command_help_r2_bin(explicit: str | None = None) -> Path:
+    """Prefer the active installed r2 for mutable command-help snapshots."""
+    if explicit:
+        return pick_r2_bin(explicit)
+    candidates = [os.environ.get("R2_BIN"), shutil.which("r2"), shutil.which("radare2")]
+    for candidate in candidates:
+        if candidate:
+            return Path(candidate)
+    return pick_r2_bin()
 
 
 def load_json(path: Path) -> list[dict[str, Any]]:
@@ -1450,7 +1464,7 @@ def parse_command_grammar_blocks(output: str, r2_source: Path) -> list[tuple[str
         stripped = line.rstrip()
         if stripped.startswith("Usage:"):
             if current:
-                blocks.append((current[0], current[:80]))
+                blocks.append((current[0], current))
             current = [stripped]
             continue
         if not current:
@@ -1462,7 +1476,7 @@ def parse_command_grammar_blocks(output: str, r2_source: Path) -> list[tuple[str
         elif len(current) < 8:
             current.append(stripped)
     if current:
-        blocks.append((current[0], current[:80]))
+        blocks.append((current[0], current))
     return blocks
 
 
@@ -1753,6 +1767,21 @@ def utc_timestamp() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def radare2_version_line(r2_bin: Path) -> str:
+    try:
+        result = subprocess.run(
+            [str(r2_bin), "-v"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
+    return clean_output(result.stdout).splitlines()[0].strip() if result.stdout.strip() else "unknown"
+
+
 def normalize_command_token(raw: str) -> str:
     token = raw.strip().strip("`'\"")
     if not token:
@@ -1761,7 +1790,7 @@ def normalize_command_token(raw: str) -> str:
         return "%"
     if token.startswith("(foo") or token.startswith("("):
         return "("
-    if token.startswith("[.:"):
+    if token.startswith("[") and ("cmd" in token or token.startswith("[.:")):
         return "commandline"
     if token.startswith("@@@"):
         return "@@@"
@@ -1776,7 +1805,7 @@ def normalize_command_token(raw: str) -> str:
     token = token.strip()
     if not token:
         return ""
-    token = token.split()[0].strip(" ,;:")
+    token = token.split()[0].strip()
     if token.startswith("|"):
         token = token[1:].strip()
     if token in {"Usage", "Usage:", "Examples", "Environment"}:
@@ -1807,6 +1836,27 @@ def command_line_summary(line: str, token: str) -> str:
     return body.strip()
 
 
+def command_summary_is_useful(summary: str) -> bool:
+    value = summary.strip().rstrip(".")
+    if len(value) < 8:
+        return False
+    lowered = value.casefold()
+    return not lowered.startswith(("same as above", "todo", "wip", "reserved"))
+
+
+def command_candidate_scope(command: str, family: str) -> str | None:
+    """Classify a help token without promoting family-local legends to commands."""
+    if command == family:
+        return "command"
+    if family == "commandline":
+        if command.startswith(("@", "~", ">", "`", "|")) or command in {"*", "j"}:
+            return "modifier"
+        return "command"
+    if family and command.startswith(family):
+        return "command"
+    return None
+
+
 def command_candidates_from_block(usage_line: str, block: list[str], source_ref: str, max_variants: int) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     usage_body = usage_line.removeprefix("Usage:").strip()
@@ -1821,6 +1871,8 @@ def command_candidates_from_block(usage_line: str, block: list[str], source_ref:
             "question": f"How does the radare2 command `{usage_token}` work and how is it constructed?",
             "line": usage_line,
             "source_ref": source_ref,
+            "family": usage_token,
+            "scope": "grammar" if usage_token == "commandline" else "command",
         })
     in_non_command_section = False
     for line in block[1:]:
@@ -1840,6 +1892,9 @@ def command_candidates_from_block(usage_line: str, block: list[str], source_ref:
         command = normalize_command_token(raw_token)
         if not command_token_is_useful(command):
             continue
+        scope = command_candidate_scope(command, usage_token)
+        if scope is None:
+            continue
         candidates.append({
             "command": command,
             "syntax": raw_token,
@@ -1847,8 +1902,10 @@ def command_candidates_from_block(usage_line: str, block: list[str], source_ref:
             "question": f"How does the radare2 command `{command}` work and how is it constructed?",
             "line": stripped,
             "source_ref": source_ref,
+            "family": usage_token,
+            "scope": scope,
         })
-        if len(candidates) >= max_variants + 1:
+        if max_variants > 0 and len(candidates) >= max_variants + 1:
             break
     return candidates
 
@@ -1872,7 +1929,7 @@ def command_decomposition(command: str) -> tuple[list[dict[str, Any]], list[str]
         meaning = COMMAND_CONTEXT_LETTER_MEANINGS.get((prefix, ch))
         if meaning is None and index == 0:
             meaning = COMMAND_ROOT_MEANINGS.get(ch)
-        if meaning is None:
+        if meaning is None and index > 0 and index == len(command) - 1 and ch in "?*jqv.-+":
             meaning = COMMAND_SUFFIX_MEANINGS.get(ch)
         known = meaning is not None
         if meaning is None:
@@ -1884,10 +1941,11 @@ def command_decomposition(command: str) -> tuple[list[dict[str, Any]], list[str]
 
 
 def command_decomposition_text(command: str, parts: list[dict[str, Any]]) -> str:
-    if not parts:
-        return "No command-letter decomposition was inferred."
+    known_parts = [part for part in parts if part.get("known")]
+    if not known_parts:
+        return "No letter-level meaning is inferred here; rely on the documented behavior below."
     rendered = []
-    for part in parts:
+    for part in known_parts:
         name = str(part.get("part", ""))
         meaning = str(part.get("meaning", ""))
         prefix = str(part.get("prefix", name))
@@ -1905,21 +1963,31 @@ def command_row_from_candidate(candidate: dict[str, Any], verification: Verifica
     syntax = str(candidate.get("syntax") or command).strip()
     line = str(candidate.get("line") or "").strip()
     source_ref = str(candidate.get("source_ref") or "r2:?*")
-    status = "needs-memory" if unknown or len(summary) < 8 else "documented"
-    decomposition = command_decomposition_text(command, parts)
+    family = str(candidate.get("family") or command)
+    scope = str(candidate.get("scope") or "command")
     if command == "afl":
         summary = summary or "list all analyzed functions"
+    status = "documented" if command_summary_is_useful(summary) and line else "needs-memory"
+    decomposition = command_decomposition_text(command, parts)
     answer_parts = [
         f"`{command}` is documented by radare2 syntax `{syntax}`.",
-        f"Command construction: {decomposition}",
+        f"Help scope: `{family}`; this entry is a {scope} form.",
+        f"Inferred construction: {decomposition}",
     ]
+    if unknown:
+        answer_parts.append(
+            "Unresolved letter-level parts: " + ", ".join(f"`{part}`" for part in unknown)
+            + ". They are not guessed; the exact behavior is grounded in the help line."
+        )
     if summary:
         answer_parts.append(f"Documented behavior: {summary}.")
     if status == "needs-memory":
-        answer_parts.append("This row is marked `needs-memory` because the local model could not confidently explain every letter or the help text is too thin; ask a human to refine it with `make memory`.")
+        answer_parts.append("This row is marked `needs-memory` because its help description is too thin to train as a standalone factual answer; ask a human to refine it with `make memory`.")
     answer_parts.append(f"Evidence line from `{source_ref}`:\n{line}")
     question = str(candidate.get("question") or f"How does the radare2 command `{command}` work?")
-    fingerprint = stable_hash(command, syntax, summary, decomposition, line)
+    if scope == "modifier":
+        question = f"How does the radare2 composition modifier `{command}` work, and what command does it attach to?"
+    fingerprint = stable_hash(command, family, scope, syntax, summary, decomposition, line)
     row_id = "agentic.command." + safe_id_part(command) + "." + stable_hash(source_ref, command, length=8)
     checks = [{"type": "contains", "value": line[:120]}] if line else [{"type": "nonempty"}]
     ok, checked, _reason = evaluate_checks(verification.output, checks)
@@ -1929,6 +1997,7 @@ def command_row_from_candidate(candidate: dict[str, Any], verification: Verifica
         "command": command,
         "content_fingerprint": fingerprint,
         "decomposition": parts,
+        "family": family,
         "id": row_id,
         "kind": "agentic_command",
         "messages": [
@@ -1937,7 +2006,9 @@ def command_row_from_candidate(candidate: dict[str, Any], verification: Verifica
             {"role": "assistant", "content": "\n\n".join(answer_parts)},
         ],
         "source_refs": [source_ref],
+        "scope": scope,
         "status": status,
+        "summary": summary,
         "syntax": syntax,
         "tags": ["agentic-command", "radare2-command", "command-grammar", status],
         "topic": "command." + safe_id_part(command),
@@ -1962,18 +2033,281 @@ def merge_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if old is None:
             by_command[command] = row
             continue
-        old_score = (0 if old.get("status") == "documented" else -2) + len(row_message_content(old, "assistant")) // 200
-        new_score = (0 if row.get("status") == "documented" else -2) + len(row_message_content(row, "assistant")) // 200
-        if new_score >= old_score:
-            refs = list(dict.fromkeys(list(old.get("source_refs", [])) + list(row.get("source_refs", []))))
+        old_score = (
+            4 * int(old.get("syntax") == old.get("command"))
+            + (0 if old.get("status") == "documented" else -2)
+            + len(row_message_content(old, "assistant")) // 200
+        )
+        new_score = (
+            4 * int(row.get("syntax") == row.get("command"))
+            + (0 if row.get("status") == "documented" else -2)
+            + len(row_message_content(row, "assistant")) // 200
+        )
+        refs = list(dict.fromkeys(list(old.get("source_refs", [])) + list(row.get("source_refs", []))))
+        if new_score > old_score:
             row["source_refs"] = refs
             by_command[command] = row
+        else:
+            old["source_refs"] = refs
     return sorted(by_command.values(), key=lambda item: safe_id_part(str(item.get("command", ""))))
 
 
-def command_training_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    out = []
+def append_assistant_section(row: dict[str, Any], section: str) -> None:
+    for message in row.get("messages", []):
+        if message.get("role") == "assistant":
+            message["content"] = str(message.get("content", "")).rstrip() + "\n\n" + section
+            return
+
+
+def enrich_command_relationships(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    command_set = {str(row.get("command")) for row in rows if row.get("command")}
+    parent_by_command: dict[str, str] = {}
     for row in rows:
+        command = str(row.get("command", ""))
+        family = str(row.get("family", ""))
+        if family and family not in {command, "commandline"} and family in command_set:
+            parent_by_command[command] = family
+            continue
+        prefixes = [candidate for candidate in command_set if candidate != command and command.startswith(candidate)]
+        if prefixes:
+            parent_by_command[command] = max(prefixes, key=len)
+
+    children: dict[str, list[str]] = {}
+    for command, parent in parent_by_command.items():
+        children.setdefault(parent, []).append(command)
+    family_members: dict[str, list[str]] = {}
+    for row in rows:
+        family_members.setdefault(str(row.get("family", "")), []).append(str(row.get("command", "")))
+
+    for row in rows:
+        command = str(row.get("command", ""))
+        parent = parent_by_command.get(command)
+        sibling_pool = children.get(parent, []) if parent else family_members.get(str(row.get("family", "")), [])
+        siblings = sorted(item for item in sibling_pool if item and item != command)[:8]
+        child_commands = sorted(children.get(command, []))[:8]
+        relationships = {
+            "parent": parent,
+            "siblings": siblings,
+            "children": child_commands,
+        }
+        row["relationships"] = relationships
+        statements = []
+        if parent:
+            statements.append(f"parent help command `{parent}`")
+        if siblings:
+            statements.append("sibling variants " + ", ".join(f"`{item}`" for item in siblings))
+        if child_commands:
+            statements.append("direct child variants " + ", ".join(f"`{item}`" for item in child_commands))
+        if statements:
+            append_assistant_section(
+                row,
+                "Documented relationships: " + "; ".join(statements)
+                + ". These links come from shared help-family and command-prefix structure; behavior still comes from each exact help line.",
+            )
+        row["content_fingerprint"] = stable_hash(
+            row.get("content_fingerprint", ""),
+            json.dumps(relationships, sort_keys=True),
+        )
+    return rows
+
+
+def enrich_command_workflow_usage(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    linked = 0
+    by_command: dict[str, list[dict[str, Any]]] = {}
+    for item in knowledge_command_usage_items(rows):
+        if int(item.get("verified_count", 0)) <= 0:
+            continue
+        row = command_row_for_expression(str(item.get("expression", "")), rows)
+        if row is None:
+            continue
+        by_command.setdefault(str(row.get("command", "")), []).append(item)
+
+    for row in rows:
+        items = sorted(
+            by_command.get(str(row.get("command", "")), []),
+            key=lambda item: (-int(item.get("verified_count", 0)), str(item.get("expression", ""))),
+        )[:4]
+        if not items:
+            continue
+        examples = []
+        for item in items:
+            examples.append({
+                "expression": item.get("expression"),
+                "knowledge_ids": list(item.get("verified_knowledge_ids", []))[:4],
+                "source_refs": list(item.get("source_refs", []))[:4],
+            })
+        row["workflow_examples"] = examples
+        rendered = []
+        for example in examples:
+            ids = ", ".join(f"`{value}`" for value in example["knowledge_ids"])
+            rendered.append(f"`{example['expression']}` ({ids or 'executable knowledge row'})")
+        append_assistant_section(
+            row,
+            "Executable workflow evidence: " + "; ".join(rendered)
+            + ". These expressions were observed in locally checked agentic rows and demonstrate arguments or composition around this help command.",
+        )
+        refs = list(row.get("source_refs", []))
+        for example in examples:
+            refs.extend(str(ref) for ref in example["source_refs"])
+        row["source_refs"] = list(dict.fromkeys(refs))
+        row["content_fingerprint"] = stable_hash(
+            row.get("content_fingerprint", ""),
+            json.dumps(examples, sort_keys=True),
+        )
+        linked += 1
+    return rows, linked
+
+
+def family_help_line(line: str, family: str) -> tuple[str, str, str]:
+    stripped = line.strip()
+    if not stripped.startswith("|"):
+        return ("note-or-example", "", stripped)
+    body = stripped[1:].strip()
+    if not body:
+        return ("note-or-example", "", "")
+    raw_token = body.split()[0]
+    command = normalize_command_token(raw_token)
+    scope = command_candidate_scope(command, family) if command_token_is_useful(command) else None
+    role = "command-variant" if scope == "command" else "composition-modifier" if scope == "modifier" else "context-local"
+    return (role, raw_token, command_line_summary(stripped, raw_token))
+
+
+def command_family_rows(
+    verification: Verification,
+    r2_source: Path,
+    r2_bin: Path,
+    chunk_size: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    source_ref = "r2:?*"
+    for usage_line, block in parse_command_grammar_blocks(verification.output, r2_source):
+        family = normalize_command_token(usage_line.removeprefix("Usage:").strip())
+        if not family:
+            family = command_grammar_token(usage_line)
+        details = [line for line in block[1:] if line.strip()]
+        if not details:
+            details = [usage_line]
+        chunks = [details[index:index + chunk_size] for index in range(0, len(details), chunk_size)]
+        for chunk_index, chunk in enumerate(chunks, 1):
+            rendered = []
+            tokens = []
+            for line in chunk:
+                role, token, summary = family_help_line(line, family)
+                if token:
+                    if token not in tokens:
+                        tokens.append(token)
+                    rendered.append(f"- [{role}] `{token}` — {summary or 'documented in this help scope'}")
+                else:
+                    rendered.append(f"- [{role}] {summary}")
+            relation = (
+                f"All entries share the help scope `{usage_line}`. `command-variant` entries are shell forms in this family; "
+                "`composition-modifier` entries attach to another command; `context-local` entries are keys, legends, or scoped notation and must not be presented as standalone commands."
+            )
+            question_tokens = ", ".join(f"`{token}`" for token in tokens[:8]) or "the documented entries"
+            answer = (
+                f"Radare2 documents this command family with `{usage_line}`. This is help chunk {chunk_index} of {len(chunks)}.\n\n"
+                + "\n".join(rendered)
+                + "\n\nRelationship and scope guidance: " + relation
+            )
+            row_id = "agentic.command-family." + safe_id_part(family) + "." + stable_hash(usage_line, "\n".join(chunk), length=10)
+            checks = [
+                {"type": "contains", "value": usage_line[:120]},
+                {"type": "contains", "value": chunk[0][:120]},
+            ]
+            _ok, checked, _reason = evaluate_checks(verification.output, checks)
+            rows.append({
+                "content_fingerprint": stable_hash(usage_line, "\n".join(chunk), relation),
+                "family": family,
+                "id": row_id,
+                "kind": "agentic_command_family",
+                "messages": [
+                    {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"Within `{usage_line}`, compare {question_tokens} in help chunk {chunk_index} of {len(chunks)} and explain their scope."},
+                    {"role": "assistant", "content": answer},
+                ],
+                "source_refs": [source_ref],
+                "status": "documented",
+                "tags": ["agentic-command", "radare2-command", "command-family", "documented"],
+                "topic": "command-family." + safe_id_part(family),
+                "usage": usage_line,
+                "verification": {
+                    "status": verification.status,
+                    "returncode": verification.returncode,
+                    "command_line": sanitize_command_line(verification.command_line, r2_source, r2_bin),
+                    "checks": checked,
+                    "output_excerpt": output_excerpt("\n".join([usage_line, *chunk]), 1800),
+                },
+            })
+    return list(rows_by_id(rows).values())
+
+
+def command_selection_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Invert trusted help into a balanced user-intent-to-command dataset."""
+    eligible = [
+        row for row in rows
+        if row.get("status") in {"documented", "human-reviewed"}
+        and row.get("scope") == "command"
+        and command_summary_is_useful(str(row.get("summary", "")))
+    ]
+    selected: dict[str, dict[str, Any]] = {}
+    for row in eligible:
+        if row.get("workflow_examples"):
+            selected[str(row.get("id"))] = row
+    by_family: dict[str, list[dict[str, Any]]] = {}
+    for row in eligible:
+        by_family.setdefault(str(row.get("family", "")), []).append(row)
+    for family_rows in by_family.values():
+        representative = min(
+            family_rows,
+            key=lambda row: (
+                str(row.get("command")) != str(row.get("family")),
+                str(row.get("syntax")) != str(row.get("command")),
+                len(str(row.get("command", ""))),
+                str(row.get("command", "")),
+            ),
+        )
+        selected[str(representative.get("id"))] = representative
+
+    output = []
+    for row in sorted(selected.values(), key=lambda item: safe_id_part(str(item.get("command", "")))):
+        command = str(row.get("command", ""))
+        syntax = str(row.get("syntax") or command)
+        summary = str(row.get("summary", "")).strip().rstrip(".")
+        family = str(row.get("family") or command)
+        relationships = row.get("relationships") or {}
+        parent = relationships.get("parent")
+        answer = f"Use `{syntax}`. Radare2 documents `{command}` under the `{family}` help scope as: {summary}."
+        if parent:
+            answer += f" Its parent help command is `{parent}`."
+        workflow_examples = list(row.get("workflow_examples", []))
+        if workflow_examples:
+            answer += f" A locally checked workflow uses `{workflow_examples[0].get('expression')}`."
+        evidence = str((row.get("verification") or {}).get("output_excerpt", "")).strip()
+        if evidence:
+            answer += "\n\nHelp evidence:\n" + evidence
+        row_id = "agentic.command-selection." + safe_id_part(command) + "." + stable_hash(row.get("id"), summary, length=10)
+        output.append({
+            "content_fingerprint": stable_hash(command, syntax, summary, family, evidence),
+            "family": family,
+            "id": row_id,
+            "kind": "agentic_command_selection",
+            "messages": [
+                {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+                {"role": "user", "content": f"Which radare2 command in the `{family}` help family matches this documented task: {summary}?"},
+                {"role": "assistant", "content": answer},
+            ],
+            "source_refs": list(row.get("source_refs", [])),
+            "status": row.get("status"),
+            "tags": ["agentic-command", "radare2-command", "command-selection", str(row.get("status"))],
+            "topic": "command-selection." + safe_id_part(command),
+            "verification": copy.deepcopy(row.get("verification", {})),
+        })
+    return output
+
+
+def command_training_rows(rows: list[dict[str, Any]], family_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    out = []
+    for row in [*rows, *(family_rows or [])]:
         # `needs-memory` means the generated explanation is explicitly
         # incomplete. Keep it in commands.jsonl and the human question queue,
         # but do not teach the uncertain decomposition to the model.
@@ -1982,7 +2316,7 @@ def command_training_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out.append({
             "content_fingerprint": row.get("content_fingerprint", ""),
             "id": row.get("id", ""),
-            "kind": "agentic_command",
+            "kind": row.get("kind", "agentic_command"),
             "messages": row.get("messages", []),
             "source_refs": row.get("source_refs", []),
             "tags": row.get("tags", []),
@@ -1990,6 +2324,54 @@ def command_training_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "verification": row.get("verification", {}),
         })
     return out
+
+
+def validate_command_outputs(
+    rows: list[dict[str, Any]],
+    family_rows: list[dict[str, Any]],
+    training_rows: list[dict[str, Any]],
+    help_snapshot: str,
+) -> dict[str, int]:
+    def has_successful_evidence(row: dict[str, Any]) -> bool:
+        verification = row.get("verification") or {}
+        checks = verification.get("checks") or []
+        return verification.get("status") == "ok" and bool(checks) and all(check.get("passed") for check in checks)
+
+    def require_unique_ids(items: list[dict[str, Any]], label: str) -> None:
+        ids = [str(item.get("id", "")) for item in items]
+        if any(not item for item in ids) or len(ids) != len(set(ids)):
+            raise ValueError(f"{label} contains missing or duplicate ids")
+
+    require_unique_ids(rows, "command database")
+    require_unique_ids(family_rows, "command family database")
+    require_unique_ids(training_rows, "command training export")
+    if len(help_snapshot.splitlines()) < 1000:
+        raise ValueError("refusing to replace the full ?* snapshot with truncated help")
+    if any(row.get("status") == "needs-memory" for row in training_rows):
+        raise ValueError("needs-memory row leaked into command training export")
+    documented_without_evidence = [
+        row for row in [*rows, *family_rows]
+        if row.get("status") == "documented"
+        and not has_successful_evidence(row)
+    ]
+    if documented_without_evidence:
+        raise ValueError("documented command row lacks successful help verification")
+    malformed_messages = [
+        row for row in training_rows
+        if [message.get("role") for message in row.get("messages", [])] != ["system", "user", "assistant"]
+    ]
+    if malformed_messages:
+        raise ValueError("command training row has malformed conversation roles")
+    return {
+        "evidence_backed_command_rows": len([
+            row for row in rows if has_successful_evidence(row)
+        ]),
+        "evidence_backed_family_rows": len([
+            row for row in family_rows if has_successful_evidence(row)
+        ]),
+        "human_reviewed_rows": len([row for row in rows if row.get("status") == "human-reviewed"]),
+        "withheld_rows": len([row for row in rows if row.get("status") == "needs-memory"]),
+    }
 
 
 
@@ -2122,8 +2504,13 @@ def command_memory_answer_section(memories: list[dict[str, Any]]) -> str:
 
 
 def strip_needs_memory_notice(answer: str) -> str:
-    notice = "This row is marked `needs-memory` because the local model could not confidently explain every letter or the help text is too thin; ask a human to refine it with `make memory`."
-    return answer.replace("\n\n" + notice, "").replace(notice + "\n\n", "").replace(notice, "").strip()
+    notices = (
+        "This row is marked `needs-memory` because the local model could not confidently explain every letter or the help text is too thin; ask a human to refine it with `make memory`.",
+        "This row is marked `needs-memory` because its help description is too thin to train as a standalone factual answer; ask a human to refine it with `make memory`.",
+    )
+    for notice in notices:
+        answer = answer.replace("\n\n" + notice, "").replace(notice + "\n\n", "").replace(notice, "")
+    return answer.strip()
 
 
 def apply_command_memories(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int]:
@@ -2408,8 +2795,15 @@ def knowledge_command_usage_items(command_rows: list[dict[str, Any]]) -> list[di
                 "knowledge_ids": [],
                 "knowledge_topics": [],
                 "source_refs": [],
+                "verified_count": 0,
+                "verified_knowledge_ids": [],
             })
             item["count"] += 1
+            verification_status = str((row.get("verification") or {}).get("status", ""))
+            if verification_status == "ok":
+                item["verified_count"] += 1
+                if row_id not in item["verified_knowledge_ids"]:
+                    item["verified_knowledge_ids"].append(row_id)
             if row_id not in item["knowledge_ids"]:
                 item["knowledge_ids"].append(row_id)
             if row_topic and row_topic not in item["knowledge_topics"]:
@@ -2605,11 +2999,13 @@ def ai_command_memory_topics(gaps: list[dict[str, Any]], args: argparse.Namespac
 
 
 def build_agentic_command_database(args: argparse.Namespace) -> int:
-    r2_bin = pick_r2_bin(args.r2_bin)
+    r2_bin = pick_command_help_r2_bin(args.r2_bin)
     r2_source = Path(args.r2_source)
     rows: list[dict[str, Any]] = []
     help_topics = list(dict.fromkeys((topic, command, title, tuple(refs)) for topic, command, title, refs in GROWTH_HELP_TOPICS))
-    variants_per_block = max(1, args.variants_per_block)
+    variants_per_block = max(0, args.variants_per_block)
+    family_rows: list[dict[str, Any]] = []
+    help_snapshot = ""
     for _topic, command, _title, refs_tuple in help_topics:
         entry = {"id": f"agentic.commands.help.{safe_id_part(command)}", "kind": "r2cmd", "answer": command, "fixture": "--", "checks": [{"type": "nonempty"}]}
         verification = run_entry(entry, r2_bin, r2_source, args.timeout)
@@ -2633,10 +3029,27 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
     }
     verification = run_entry(full_entry, r2_bin, r2_source, args.timeout)
     if verification.ok:
+        clean_help = sanitize_text(clean_output(verification.output), r2_source)
+        help_snapshot = "\n".join(line.rstrip() for line in clean_help.strip().splitlines()) + "\n"
+        try:
+            old_snapshot = COMMAND_HELP_SNAPSHOT_PATH.read_text(encoding="utf-8")
+        except OSError:
+            old_snapshot = ""
+        if old_snapshot != help_snapshot:
+            COMMAND_HELP_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            COMMAND_HELP_SNAPSHOT_PATH.write_text(help_snapshot, encoding="utf-8")
+        family_rows = command_family_rows(
+            verification,
+            r2_source,
+            r2_bin,
+            max(4, args.family_chunk_size),
+        )
         for usage_line, block in parse_command_grammar_blocks(verification.output, r2_source):
             for candidate in command_candidates_from_block(usage_line, block, "r2:?*", variants_per_block):
                 rows.append(command_row_from_candidate(candidate, verification, r2_source, r2_bin))
     rows = merge_command_rows(rows)
+    rows = enrich_command_relationships(rows)
+    rows, workflow_linked_rows = enrich_command_workflow_usage(rows)
     rows, memory_applied, synthetic_memory_rows = apply_command_memories(rows)
     if args.limit > 0 and len(rows) > args.limit:
         human_rows = [row for row in rows if row.get("status") == "human-reviewed"]
@@ -2648,8 +3061,13 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
     previous = read_jsonl(COMMANDS_DB_PATH)
     previous_by_id = rows_by_id(previous)
     changed = [row for row in rows if previous_by_id.get(str(row.get("id"))) != row]
-    write_jsonl(COMMANDS_DB_PATH, rows)
-    write_jsonl(COMMANDS_TRAINING_PATH, command_training_rows(rows))
+    selection_rows = command_selection_rows(rows)
+    training_rows = command_training_rows(rows, [*family_rows, *selection_rows])
+    quality_gate = validate_command_outputs(rows, family_rows, training_rows, help_snapshot)
+    write_jsonl_if_changed(COMMANDS_DB_PATH, rows)
+    write_jsonl_if_changed(COMMANDS_FAMILIES_PATH, family_rows)
+    write_jsonl_if_changed(COMMANDS_SELECTION_PATH, selection_rows)
+    write_jsonl_if_changed(COMMANDS_TRAINING_PATH, training_rows)
     gaps = [row for row in rows if row.get("status") == "needs-memory"]
     topics: list[dict[str, Any]] = []
     knowledge_topics: list[dict[str, Any]] = []
@@ -2665,20 +3083,34 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
         if len(topics) < args.memory_limit:
             topics.extend(heuristic_command_memory_topics(gaps, args.memory_limit - len(topics)))
     topics = topics[: args.memory_limit]
-    topic_count, queued_count = queue_command_memory_topics(topics, args.queue_memory)
+    if args.memory_limit > 0:
+        topic_count, queued_count = queue_command_memory_topics(topics, args.queue_memory)
+    else:
+        topic_count = len(read_jsonl(COMMANDS_MEMORY_TOPICS_PATH))
+        queued_count = 0
     index = {
         "command_rows": len(rows),
+        "command_family_rows": len(family_rows),
+        "command_scope_rows": len([row for row in rows if row.get("scope") == "command"]),
+        "command_selection_rows": len(selection_rows),
+        "modifier_scope_rows": len([row for row in rows if row.get("scope") == "modifier"]),
+        "workflow_linked_rows": workflow_linked_rows,
         "documented_rows": len([row for row in rows if row.get("status") == "documented"]),
         "human_reviewed_rows": len([row for row in rows if row.get("status") == "human-reviewed"]),
         "needs_memory_rows": len(gaps),
-        "training_rows": len(command_training_rows(rows)),
+        "training_rows": len(training_rows),
         "last_changed_rows": len(changed),
         "memory_rows_applied": memory_applied,
         "synthetic_memory_rows": synthetic_memory_rows,
         "memory_topics": topic_count,
         "knowledge_memory_topics": len(knowledge_topics),
+        "quality_gate": quality_gate,
+        "radare2_version": radare2_version_line(r2_bin),
         "memory_topics_queued": queued_count,
-        "source_refs": ["r2:?*", "r2:<command>? help"],
+        "help_snapshot": repo_path_ref(COMMAND_HELP_SNAPSHOT_PATH),
+        "help_snapshot_lines": len(help_snapshot.splitlines()),
+        "help_snapshot_sha256": hashlib.sha256(help_snapshot.encode("utf-8")).hexdigest() if help_snapshot else "",
+        "source_refs": ["r2:?*", "r2:<command>? help", repo_path_ref(COMMAND_HELP_SNAPSHOT_PATH)],
         "ai_mode": args.ai,
         "updated_at": utc_timestamp(),
     }
@@ -2687,7 +3119,10 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
     print(f"agentic commands {len(rows)} rows, {len(changed)} changed, {len(gaps)} need memory")
     print(f"agentic commands memory applied {memory_applied} accepted memories, {synthetic_memory_rows} synthetic rows")
     print(f"agentic commands db {repo_path_ref(COMMANDS_DB_PATH)}")
+    print(f"agentic commands families {len(family_rows)} rows in {repo_path_ref(COMMANDS_FAMILIES_PATH)}")
+    print(f"agentic commands selections {len(selection_rows)} rows in {repo_path_ref(COMMANDS_SELECTION_PATH)}")
     print(f"agentic commands training {repo_path_ref(COMMANDS_TRAINING_PATH)}")
+    print(f"agentic commands help snapshot {len(help_snapshot.splitlines())} lines in {repo_path_ref(COMMAND_HELP_SNAPSHOT_PATH)}")
     print(f"agentic commands memory topics {topic_count} written to {repo_path_ref(COMMANDS_MEMORY_TOPICS_PATH)}")
     if knowledge_topics:
         print(f"agentic commands knowledge memory topics {len(knowledge_topics)} mined from {repo_path_ref(KNOWLEDGE_PATH)}")
@@ -4070,8 +4505,9 @@ def main(argv: list[str]) -> int:
     commands_parser.add_argument("--r2-bin", default=None)
     commands_parser.add_argument("--r2-source", default=str(DEFAULT_R2_SOURCE))
     commands_parser.add_argument("--timeout", type=int, default=20)
-    commands_parser.add_argument("--limit", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_LIMIT", "240")))
-    commands_parser.add_argument("--variants-per-block", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_VARIANTS_PER_BLOCK", "8")))
+    commands_parser.add_argument("--limit", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_LIMIT", "0")))
+    commands_parser.add_argument("--variants-per-block", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_VARIANTS_PER_BLOCK", "0")))
+    commands_parser.add_argument("--family-chunk-size", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_FAMILY_CHUNK_SIZE", "12")))
     commands_parser.add_argument("--memory-limit", type=int, default=int(os.environ.get("AGENTIC_COMMANDS_MEMORY_LIMIT", "24")))
     commands_parser.add_argument("--queue-memory", action=argparse.BooleanOptionalAction, default=False)
     commands_parser.add_argument("--ai", choices=["auto", "off", "required"], default=os.environ.get("AGENTIC_COMMANDS_AI", "auto"))

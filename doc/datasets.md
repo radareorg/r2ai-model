@@ -21,10 +21,10 @@ The default training workflow merges these eight files:
 | `data/radare2-agentic/verified.jsonl` | 10 | Command execution and declared checks pass on local fixtures |
 | `data/r2js/verified.jsonl` | 5 | Local r2js execution and checks pass |
 | `data/reasoning-long/verified.jsonl` | 4 | Local multi-command execution and checks pass |
-| `data/agentic-knowledge/knowledge.jsonl` | 349 | Mixed: 203 executable, 6 source-scan checked, 140 source-grounded but not executable |
-| `data/agentic-commands/verified.jsonl` | 55 | Only 45 locally documented and 10 human-reviewed rows; 185 uncertain rows are withheld |
+| `data/agentic-knowledge/knowledge.jsonl` | 357 | Mixed executable, source-scan checked, and source-grounded knowledge |
+| `data/agentic-commands/verified.jsonl` | 2,584 | Exact current `?*` help: 1,932 individual command rows, 360 scoped family chunks, and 292 balanced intent-selection rows |
 | `data/memory/verified.jsonl` | 9 | Direct human corrections exported from accepted memory records |
-| **Current source total** | **1,158** | Expected result of a fresh merge |
+| **Current source total** | **3,695** | Expected result of a fresh merge |
 
 The merge validates every conversation and writes a uniform training-only row
 containing `messages` and optional `tools`. It does not shuffle, split, or
@@ -40,7 +40,7 @@ training loader consumes only `messages` and optional `tools`, and
 heterogeneous verification check values cannot be represented by one inferred
 Arrow schema.
 
-The current generated artifact contains all 1,158 rows from the eight sources.
+The current generated artifact contains all 3,695 rows from the eight sources.
 The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
@@ -62,10 +62,11 @@ group-aware test split using `dataset.test_split` and `dataset.split_seed`.
 Rows sharing a normalized user question, exact assistant target, or canonical
 tool call are connected and assigned together, preventing command variants and
 their tool-calling equivalents from leaking across train and test.
-The current split is 1,042 train rows and 116 test rows across 744 related-row
-groups. There are 361 duplicated user-question groups covering 726 rows, mostly
-the deliberate classic text-answer/tool-call pairs. They are kept in the same
-split, but their duplicated weight should be evaluated by ablation.
+The current split is 3,325 train rows and 370 test rows across 2,711 related-row
+groups. There are 623 normalized duplicate user-question groups covering 1,583
+rows, including deliberate classic text-answer/tool-call pairs and related
+command variants. They are kept in the same split, but their duplicated weight
+should be evaluated by ablation.
 
 All included configs point to the merged dataset. `training/config.yaml` is the
 default Qwen3 4B LoRA run; `training/config.minicpm5.yaml` and
@@ -82,7 +83,7 @@ promotion paths are:
 | Classic tool calls | `r2cmd.py` converts each classic command | Deterministic schema conversion; no r2 execution | Inherits classic acceptance | Tool name and structured command argument are valid |
 | Fixed agentic seeds | Humans author `seeds.json` or `tasks.json` | radare2/r2js runs locally and every declared check passes | Failures may enter `pending-human.jsonl` | Verification succeeds |
 | Agentic knowledge | Deterministic source/doc/test scanners, experiments, optional online collection, and accepted human answers | ID/content dedupe, quality filters, category caps; executable rows run checks | Pending answers are recorded in `human-responses.jsonl` | The builder promotes it to the aggregate; not every row has executable evidence |
-| Command grammar | Local radare2 help and `?*` parsing | Help command succeeds and evidence lines are retained | Memory answers can replace weak decompositions | Status is `documented` or `human-reviewed`; `needs-memory` is now excluded |
+| Command grammar | Current local `?*`, scoped help parsing, prefix relationships, and checked knowledge workflows | Full-help anti-truncation gate, exact evidence, unique IDs, role validation, and successful help checks | Memory answers can replace thin descriptions | Status is `documented` or `human-reviewed`; 39 `needs-memory` rows are withheld |
 | Human memory | A person answers a queued topic or records a correction | JSON/schema, fingerprint, and duplicate handling; no factual verifier | The submitter is the review authority | Memory status is accepted and `memory.py export-training` runs |
 | AI proposals | `agentic-dataset.py propose` calls an OpenAI-compatible model | JSON parsing only | None in the proposal command itself | Never automatically; `ai-proposals.jsonl` is currently disconnected from promotion |
 
@@ -98,10 +99,10 @@ metadata. Two aggregate rows are tagged `human-review`. The 9 human-memory rows
 are a separate, explicitly human-authored source. This distinction matters:
 valid JSON and provenance are not the same as factual or executable validation.
 
-Current human-review state is 297 memory topics (290 pending and 7 answered),
-3 curated agentic questions, and 3 recorded agentic responses. The largest
-quality bottleneck is the review backlog, including 185 command rows that remain
-in `commands.jsonl` but are deliberately absent from training.
+Current human-review state is 314 pending memory topics and 7 answered topics,
+plus the curated agentic review queues. The command builder reduced its withheld
+set from 185 of 240 rows to 39 of 1,971 rows by trusting exact help behavior
+without guessing unresolved letter meanings.
 
 ## Training and model compatibility
 
@@ -132,14 +133,15 @@ r2ai-model preflight --config config.minicpm5.yaml
 r2ai-model preflight --config config.lfm2.5.yaml
 ```
 
-The current 1,158-row corpus passes full preflight with all three included
-configs:
+The current 3,695-row corpus passes full preflight with the default Qwen config;
+run the same preflight after changing either alternative model dependency set.
+The included model configurations are:
 
 | Config | Model | Parameters | Full template preflight | Intended strength |
 | --- | --- | ---: | --- | --- |
 | `config.yaml` | `jan-hq/Qwen3-4B-no-think` | 4B | Pass | Heavier default |
-| `config.minicpm5.yaml` | `openbmb/MiniCPM5-1B` | 1B | Pass | Small tool use, code, reasoning |
-| `config.lfm2.5.yaml` | `LiquidAI/LFM2.5-1.2B-Instruct` | 1.2B | Pass | Fast edge inference and function calling |
+| `config.minicpm5.yaml` | `openbmb/MiniCPM5-1B` | 1B | Not rerun | Small tool use, code, reasoning |
+| `config.lfm2.5.yaml` | `LiquidAI/LFM2.5-1.2B-Instruct` | 1.2B | Not rerun | Fast edge inference and function calling |
 
 Passing preflight means the fast tokenizer, chat template, structured tool
 calls, assistant-only labels, maximum length, and split all work. It does not
@@ -170,8 +172,9 @@ In priority order:
    Score exact/normalized command selection, tool-call JSON, command execution,
    expected output checks, refusal on unsafe/unknown requests, and multi-turn
    recovery. The current grouped 10% split measures loss, not useful r2 ability.
-2. Work down the 290-topic human backlog, starting with common command grammar.
-   Each accepted correction should rebuild `commands.jsonl`, its 55-row-or-larger
+2. Work down the human backlog, starting with the 39 withheld command rows and
+   common workflow gaps. Each accepted correction should rebuild `commands.jsonl`, its
+   trusted export,
    trusted export, and the merged dataset.
 3. Add an explicit trust policy for the 140 agentic-knowledge rows without
    machine checks and the legacy 363 Q/A pairs. Require a human approval marker,
@@ -345,13 +348,12 @@ command answers.
 
 `data/agentic-knowledge/` is the generated, quality-filtered knowledge base:
 
-* `knowledge.jsonl`: 349 deduplicated aggregate rows. It contains 203
-  `agentic_knowledge` rows and 146 `agentic_experiment` rows. Of these, 203
+* `knowledge.jsonl`: 357 deduplicated aggregate rows. It contains 207
+  `agentic_knowledge` rows and 150 `agentic_experiment` rows. Of these, 211
   have successful executable verification, 6 have source-scan checks, 140 have
-  no machine-verification status, and 335 have titles.
-* `runs/*.jsonl`: 43 append-only audit shards containing 330 unique rows. Every
-  current shard row is represented in the aggregate. Do not train from the
-  shards separately.
+  no machine-verification status, and 343 have titles.
+* `runs/*.jsonl`: append-only audit shards. Do not train from the shards
+  separately.
 * `pending-human.jsonl`: currently empty.
 * `index.json`: generation statistics, budgets, category limits, and quality
   policies; it is metadata rather than training data.
@@ -369,16 +371,20 @@ generation.
 `data/agentic-commands/` describes command families, letters, suffixes,
 modifiers, iterators, and command-line composition:
 
-* `commands.jsonl`: 240 source records: 45 `documented`, 185 `needs-memory`,
-  and 10 `human-reviewed`.
-* `verified.jsonl`: 55 simplified chat-format training exports: the 45
-  `documented` and 10 `human-reviewed` records. The 185 `needs-memory` rows are
-  retained for maintenance and review but are not training data.
+* `commands.jsonl`: 1,971 source records: 1,922 `documented`, 39
+  `needs-memory`, and 10 `human-reviewed`; 134 link to executable workflows.
+* `families.jsonl`: 360 scoped chunks from 257 `Usage:` help blocks. Local
+  legends and mode keys remain context-local instead of becoming fake commands.
+* `selection.jsonl`: 292 balanced task-to-command rows, using one family
+  representative plus commands found in executable workflows.
+* `verified.jsonl`: 2,584 simplified chat-format training exports. The 39
+  `needs-memory` records remain withheld from training.
 * `memory-topics.jsonl`: 24 clarification topics derived from weak command
   rows.
 * `knowledge-memory-topics.jsonl`: 24 clarification topics derived from
   commands found in the broader agentic knowledge base.
-* `index.json`: row counts and generation metadata.
+* `index.json`: row counts, current help hash, quality-gate results, and
+  workflow-link statistics.
 
 A source command record contains `command`, `syntax`, a per-character
 `decomposition`, `unknown_parts`, status, messages, sources, tags, topic, and
@@ -389,7 +395,7 @@ verification. Human-reviewed rows can also have `memory_refs` and
 
 `data/memory/` stores corrections and clarifications supplied by humans:
 
-* `topics.jsonl`: 297 clarification topics, currently 290 pending and 7
+* `topics.jsonl`: 321 clarification topics, currently 314 pending and 7
   answered.
 * `memory.jsonl`: 9 accepted source memories.
 * `verified.jsonl`: 9 exported chat-format training rows.

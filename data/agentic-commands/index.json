@@ -1,19 +1,35 @@
 {
   "ai_mode": "off",
-  "command_rows": 240,
-  "documented_rows": 45,
+  "command_family_rows": 360,
+  "command_rows": 1971,
+  "command_scope_rows": 1930,
+  "command_selection_rows": 292,
+  "documented_rows": 1922,
+  "help_snapshot": "data/radare2/sources/all_commands.txt",
+  "help_snapshot_lines": 3400,
+  "help_snapshot_sha256": "c491faf621474dfd1aca8180b182fa27bc9f42b1491d80b3e56759beea60c5f5",
   "human_reviewed_rows": 10,
-  "knowledge_memory_topics": 24,
-  "last_changed_rows": 0,
-  "memory_rows_applied": 9,
+  "knowledge_memory_topics": 8,
+  "last_changed_rows": 243,
+  "memory_rows_applied": 7,
   "memory_topics": 24,
-  "memory_topics_queued": 24,
-  "needs_memory_rows": 185,
+  "memory_topics_queued": 0,
+  "modifier_scope_rows": 37,
+  "needs_memory_rows": 39,
+  "quality_gate": {
+    "evidence_backed_command_rows": 1968,
+    "evidence_backed_family_rows": 360,
+    "human_reviewed_rows": 10,
+    "withheld_rows": 39
+  },
+  "radare2_version": "radare2 6.1.9 +37331 abi:114 @ linux-arm_64",
   "source_refs": [
     "r2:?*",
-    "r2:<command>? help"
+    "r2:<command>? help",
+    "data/radare2/sources/all_commands.txt"
   ],
-  "synthetic_memory_rows": 1,
-  "training_rows": 55,
-  "updated_at": "2026-07-11T09:37:13Z"
+  "synthetic_memory_rows": 3,
+  "training_rows": 2584,
+  "updated_at": "2026-07-11T11:43:24Z",
+  "workflow_linked_rows": 134
 }

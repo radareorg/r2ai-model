@@ -1,8 +1,8 @@
 # Agentic Commands
 
 `make agentic-commands` builds a reusable radare2 command grammar dataset. It
-reads radare2 help output, the full `?*` command-line grammar, and the existing
-command database, then writes command explanations and memory questions.
+executes the installed radare2 `?*` help, refreshes the full help snapshot, and
+writes evidence-backed command, modifier, command-family, and memory rows.
 
 ```sh
 make agentic-commands
@@ -18,8 +18,16 @@ memory topics are not queued again.
 Files:
 
 * `data/agentic-commands/commands.jsonl`: command database with syntax,
-  decomposition, status, source refs, and verification metadata.
-* `data/agentic-commands/verified.jsonl`: chat-format training export.
+  scope, family relationships, executable workflow uses, status, source refs,
+  and verification metadata.
+* `data/agentic-commands/families.jsonl`: chunked `Usage:` blocks that retain
+  contextual keys, legends, examples, sibling variants, and scope labels.
+* `data/agentic-commands/selection.jsonl`: balanced inverse examples that map a
+  documented user intent to one representative command per family, plus
+  commands observed in executable workflows.
+* `data/agentic-commands/verified.jsonl`: chat-format training export combining
+  trusted individual, command-family, and intent-selection rows.
+* `data/radare2/sources/all_commands.txt`: current sanitized output of `?*`.
 * `data/agentic-commands/memory-topics.jsonl`: questions generated from weak
   command explanations and command usage mined from the knowledge database.
 * `data/agentic-commands/knowledge-memory-topics.jsonl`: questions that
@@ -28,13 +36,21 @@ Files:
 * `data/memory/topics.jsonl`: queued questions consumed by `make memory` or
   `make agentic-memory-file`.
 
-The command rows explain how command strings are composed. For example, `afl` is
-explained as `a` for analysis, `f` for function under analysis, and `l` for list
-under `af`, so `afl` lists analyzed functions. `make agentic-commands` also
-mines existing agentic knowledge rows for real workflow commands like `pdf @
-main`, `afi@...~noret[1]`, and ESIL stepping sequences, then queues questions
-when those expressions are missing, weak, or composed from modifiers the command
-database should learn.
+The command rows keep exact syntax and evidence lines separate from inferred
+letter meanings. Unknown letters no longer make authoritative help unusable,
+and they are never guessed. Prefix relationships connect parents, siblings, and
+children such as `af`, `afl`, `aflj`, and `aflq`. Executable rows already in the
+agentic knowledge database add checked workflow expressions such as `pdf @ main`
+or filtered ESIL sequences. Family rows preserve local legends such as the
+`pxA` color-map keys while explicitly marking them context-local, preventing a
+legend token like `_C` from being learned as a standalone shell command.
+
+The build has deterministic quality gates: duplicate IDs, truncated `?*`
+output, unverified documented rows, malformed conversations, and accidental
+`needs-memory` promotion fail the command. The index records the help hash,
+coverage, trust counts, and workflow linkage. Set
+`AGENTIC_COMMANDS_ARGS="--memory-limit 0 --no-queue-memory"` when refreshing the
+dataset without changing the human-review queue.
 
 AI support is optional. With `OPENAI_API_KEY` set, the command builder can ask an
 OpenAI-compatible model for better human-memory questions about weak rows:

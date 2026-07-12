@@ -53,10 +53,13 @@ r2ai-model answer --file answer.json
 
 ## Agentic Commands
 
-Use `make agentic-commands` to build `data/agentic-commands/` from radare2
-command help, `?*` command-line grammar, and optional OpenAI-compatible memory
-question proposals. The target also queues weak command explanations into
-`data/memory/topics.jsonl`, so `make memory` can collect human corrections.
+Use `make agentic-commands` to refresh the full installed-radare2 `?*` snapshot
+and build scoped command and command-family training rows. Exact help evidence,
+parent/sibling relationships, and locally checked workflow uses are retained;
+context-local help keys are not mislabeled as standalone commands. Optional
+OpenAI-compatible support proposes questions only. The target queues the small
+remaining set of weak descriptions into `data/memory/topics.jsonl` for human
+correction.
 
 ```sh
 make agentic-commands
