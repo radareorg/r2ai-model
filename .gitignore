@@ -1,0 +1,8 @@
+/data/training/
+/train/venv/
+/training/venv/
+/training/output*/
+/training/*.gguf
+/training/.ollama-Modelfile
+**/__pycache__/
+*.pyc

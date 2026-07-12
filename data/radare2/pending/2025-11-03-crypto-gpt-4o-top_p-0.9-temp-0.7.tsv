@@ -1,0 +1,187 @@
+q	a
+How can I search for AES keys expanded in memory?	/ca aes
+Find all GPG/PGP keys and signatures in the binary.	/cg
+How do I search for ASN1/DER private keys?	/cr
+Locate well-known constant tables from hash algorithms.	/ck
+How can I search for a private key matching a given public key?	/cp
+Search for a block of data matching a given hash digest.	/h sha256
+Decode a base64 encoded string in the binary.	?b64 Zm9vYmFy
+Find collisions for a given hash digest using lowercase alphabet.	/cca md5 098f6bcd4621d373cade4e832627b4f6
+Find collisions for a given hash digest using digits only.	/ccd sha1 da39a3ee5e6b4b0d3255bfef95601890afd80709
+Search for expanded SM4 keys in memory.	/ca sm4
+Find the first occurrence of data with a matching hash digest.	/h md5
+Find GPG keys in binary form.	/cg
+Search for ASN1/DER certificates in the binary.	/cd
+How to find crypto material using libmagic?	/m crypto
+Find all sections by grouping blocks with similar entropy.	/s
+How can I search for Rabin Karp algorithm matches in the binary?	/k
+Generate a random number between two values.	?r 1 100
+How to encode a string in base64?	?b64- foobar
+Find all printable characters in the binary.	p= p
+How to search for strings of a given size?	/z 5 10
+What is the entropy of the current block?	ph entropy
+Search for magic patterns related to crypto.	/m crypto
+How to print the entropy of the entire file?	p=e
+List all available hash algorithms in radare2.	ph
+How to find known magic patterns related to crypto?	/m crypto
+Find the first occurrence not matching a given byte pattern.	/! ff
+Search for Rabin Karp algorithm matches in strings.	/k
+How to find ASN1/DER private keys in the binary?	/cr
+Search for ASN1 OID in the binary.	pFo
+How do I search for ASN1/DER certificates in the binary?	/cd
+Find ASN1/DER private keys using libmagic.	/m crypto
+How to search for sections with similar entropy?	/s
+Find entropy of each block in the binary.	p=e
+How to find sections by grouping blocks with similar entropy?	/s
+Search for ASN1/DER private keys in the binary.	/cr
+Find ASN1 OID in the binary.	pFo
+How to locate well-known constant tables from hash algorithms?	/ck
+Find all ASN1/DER certificates in the binary.	/cd
+Search for ASN1/DER certificates using libmagic.	/m crypto
+Find GPG/PGP keys and signatures in the binary.	/cg
+Search for ASN1/DER private keys using libmagic.	/m crypto
+Find all ASN1/DER private keys in the binary.	/cr
+How can I find ASN1/DER private keys in the binary?	/cr
+Find all GPG/PGP keys and signatures in the binary.	/cg
+How to find GPG/PGP keys in binary form?	/cg
+Find ASN1/DER certificates in the binary.	/cd
+Locate well-known constant tables from hash algorithms in the binary.	/ck
+Search for ASN1/DER certificates in the binary.	/cd
+How to find ASN1/DER private keys in the binary?	/cr
+Find ASN1/DER certificates in the binary using libmagic.	/m crypto
+Find all GPG/PGP keys in the binary.	/cg
+Locate ASN1/DER certificates in the binary.	/cd
+How to find well-known constant tables from hash algorithms?	/ck
+Find ASN1/DER private keys using libmagic.	/m crypto
+Search for GPG/PGP keys and signatures in the binary.	/cg
+Find all ASN1/DER certificates in the binary.	/cd
+Search for well-known constant tables from hash algorithms.	/ck
+How to find ASN1/DER certificates in the binary?	/cd
+Locate ASN1/DER private keys in the binary.	/cr
+Find all ASN1/DER private keys in the binary.	/cr
+Search for ASN1/DER private keys in the binary.	/cr
+Find ASN1/DER certificates using libmagic.	/m crypto
+Search for well-known constant tables from hash algorithms in the binary.	/ck
+How to find ASN1/DER private keys in the binary?	/cr
+Locate ASN1/DER private keys in the binary.	/cr
+Find ASN1/DER certificates in the binary.	/cd
+How to locate well-known constant tables from hash algorithms?	/ck
+Find ASN1/DER private keys in the binary.	/cr
+Search for ASN1/DER certificates in the binary.	/cd
+How to locate ASN1/DER certificates in the binary?	/cd
+Find ASN1/DER private keys using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+Locate ASN1/DER private keys in the binary.	/cr
+Find ASN1/DER certificates using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+How to find ASN1/DER private keys in the binary?	/cr
+Find ASN1/DER private keys using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+Locate ASN1/DER certificates in the binary.	/cd
+How to find ASN1/DER certificates in the binary?	/cd
+Find ASN1/DER private keys using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+Locate ASN1/DER private keys in the binary.	/cr
+Find ASN1/DER certificates using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+How to find ASN1/DER private keys in the binary?	/cr
+Find ASN1/DER private keys using libmagic.	/m crypto
+Search for ASN1/DER private keys in the binary.	/cr
+Locate ASN1/DER certificates in the binary.	/cd
+How to find ASN1/DER certificates in the binary?	/cd
+Find ASN1/DER private keys using libmagic.	/m crypto
+How do I search for a cryptographic signature in a binary?	/cg
+Find the entropy of a specific section in the binary.	/s
+How to search for encrypted data blocks in a binary?	/s
+Identify all ASN1/DER encoded data structures.	/cd
+Search for cryptographic key material using libmagic.	/m crypto
+How can I find PKCS7 data in the binary?	pFp
+List all known ASN1 OID in the binary.	pFo
+Search for encrypted sections by entropy analysis.	/s
+How can I find x509 certificates in the binary?	pFx
+Find all cryptographic signatures in the binary.	/cg
+How to identify private keys in a binary file?	/cr
+Search for data blocks with high entropy.	/s
+Locate DER encoded data structures in the binary.	/cd
+Identify encrypted data by high entropy values.	/s
+How to find cryptographic material using magic bytes?	/m crypto
+Locate PKCS7 structures within a binary.	pFp
+How do I search for cryptographic constants?	/ck
+Find ASN1 encoded data in the binary.	/cd
+Locate high entropy sections in the binary.	/s
+How to search for digital signatures in a binary?	/cg
+Identify all x509 certificates in the binary.	pFx
+How can I search for high entropy blocks?	/s
+Find all ASN1/DER structures using libmagic.	/m crypto
+Search for GPG signatures in a binary.	/cg
+Locate encrypted data by analyzing entropy.	/s
+How to find cryptographic signatures in the binary?	/cg
+Identify sections with high entropy.	/s
+Find DER encoded keys in the binary.	/cr
+Search for cryptographic data structures.	/cd
+How can I locate high entropy data blocks?	/s
+Find all cryptographic materials using magic numbers.	/m crypto
+Identify DER encoded certificates in the binary.	/cd
+How to search for cryptographic keys in memory?	/ca
+Locate cryptographic signatures in the binary.	/cg
+Find high entropy data sections.	/s
+How to find x509 certificates using libmagic?	/m crypto
+Search for encrypted data by entropy analysis.	/s
+Identify all cryptographic constants in a binary.	/ck
+Find ASN1/DER encoded certificates.	/cd
+How can I find cryptographic keys in a binary?	/ca
+Search for high entropy regions in the binary.	/s
+Locate digital signatures in the binary.	/cg
+Identify all cryptographic materials using libmagic.	/m crypto
+Find DER encoded data structures in memory.	/cd
+How to identify x509 certificates in a binary?	pFx
+Locate cryptographic key materials.	/ca
+Search for cryptographic data using entropy.	/s
+Find all cryptographic signatures in a binary.	/cg
+How to find high entropy data regions?	/s
+Identify all cryptographic keys in the binary.	/ca
+Search for DER encoded certificates.	/cd
+Locate cryptographic data by entropy.	/s
+How can I find cryptographic signatures?	/cg
+Find all high entropy sections in a binary.	/s
+Identify cryptographic key material in memory.	/ca
+Search for x509 certificates in the binary.	pFx
+Locate cryptographic data structures.	/cd
+Find all cryptographic materials in a binary.	/m crypto
+How to search for high entropy data?	/s
+Identify cryptographic signatures in a binary.	/cg
+Locate all cryptographic keys in a binary.	/ca
+Search for cryptographic constants.	/ck
+Find DER encoded keys in memory.	/cr
+How can I locate cryptographic signatures?	/cg
+Identify all high entropy data blocks.	/s
+Find cryptographic data structures in a binary.	/cd
+Search for cryptographic key materials.	/ca
+Locate high entropy data sections.	/s
+How to find cryptographic constants in a binary?	/ck
+Identify DER encoded data in memory.	/cd
+Find all cryptographic signatures.	/cg
+Search for cryptographic data by entropy.	/s
+Locate cryptographic keys in a binary.	/ca
+How can I identify high entropy data?	/s
+Find cryptographic materials using magic.	/m crypto
+Identify cryptographic signatures in memory.	/cg
+Search for DER encoded certificates in memory.	/cd
+Locate all cryptographic materials.	/m crypto
+How to find cryptographic keys in a binary?	/ca
+Identify high entropy data blocks.	/s
+Find cryptographic data structures in memory.	/cd
+Search for cryptographic signatures in a binary.	/cg
+Locate cryptographic key materials.	/ca
+How can I find high entropy data?	/s
+Identify cryptographic signatures in a binary.	/cg
+Find all cryptographic keys in a binary.	/ca
+Search for cryptographic constants in memory.	/ck
+Locate DER encoded keys in a binary.	/cr
+How to locate cryptographic signatures in memory?	/cg
+Identify high entropy data sections.	/s
+Find cryptographic data structures in a binary.	/cd
+Search for cryptographic key materials in memory.	/ca
+Locate high entropy sections in a binary.	/s
+How can I find cryptographic constants?	/ck
+Identify DER encoded data structures.	/cd
