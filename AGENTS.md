@@ -6,6 +6,7 @@ Basic workflow for this repository:
 # discover root and lower-level training targets
 make help
 make -C training help
+r2ai-model help
 
 # install the agent-facing CLI into /usr/local/bin
 make install
@@ -26,6 +27,7 @@ r2ai-model commands
 # answer or drop pending human-review rows
 make agentic-pending
 r2ai-model pending
+r2ai-model review
 
 # collect human corrections interactively or through JSON batch mode
 make memory
@@ -39,11 +41,14 @@ make memory-export
 # validate templates, then install deps, merge all data, train, and export GGUF
 make preflight
 make train
-r2ai-model preflight
-r2ai-model train
+r2ai-model datasets --check
+r2ai-model merge
+r2ai-model preflight --preset qwen
+r2ai-model train --preset qwen
 
 # train MiniCPM5 against the merged agentic dataset
 make -C training train-minicpm5
+r2ai-model train --preset minicpm5
 
 # chat with the default trained GGUF through Ollama
 make chat

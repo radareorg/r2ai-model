@@ -87,15 +87,15 @@ lora:
 Validate all rows against a model template without loading weights:
 
 ```sh
-r2ai-model preflight
-r2ai-model preflight --config config.minicpm5.yaml
+r2ai-model preflight --preset qwen
+r2ai-model preflight --preset minicpm5
 ```
 
 Train the default model, including dependency setup, merge, and GGUF export:
 
 ```sh
 make train
-r2ai-model train
+r2ai-model train --preset qwen
 ```
 
 Alternative included configs:
@@ -103,6 +103,8 @@ Alternative included configs:
 ```sh
 make -C training train-minicpm5
 make -C training train-lfm25
+r2ai-model train --preset minicpm5
+r2ai-model train --preset lfm25
 ```
 
 MiniCPM5 uses the standard Llama causal-LM architecture, but its model card recommends `transformers>=5.6`. The training requirements reflect that floor.
@@ -113,19 +115,21 @@ Use the default GGUF with Ollama:
 
 ```sh
 make chat
-r2ai-model chat
+r2ai-model chat --preset qwen
 ```
 
 Use a specific GGUF from disk:
 
 ```sh
 make -C training chat MODEL=radare2-qwen3-4b-finetuned.gguf OLLAMA_MODEL=r2ai-qwen3
+r2ai-model chat --preset qwen --name r2ai-qwen3
 ```
 
 Serve the same file with llama.cpp's OpenAI-compatible server:
 
 ```sh
 make -C training serve MODEL=radare2-qwen3-4b-finetuned.gguf LLAMA_PORT=8080
+r2ai-model serve --preset qwen --port 8080
 ```
 
 Then point an OpenAI-compatible client at `http://127.0.0.1:8080/v1`.

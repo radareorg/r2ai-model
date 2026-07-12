@@ -1,6 +1,6 @@
 # Makefile for Radare2 AI Model Training
 
-.PHONY: all venv deps compile-dataset merge-agentic-dataset preflight train train-agentic train-minicpm5 train-lfm25 chat ollama-create serve clean help
+.PHONY: all venv deps compile-dataset merge-agentic-dataset preflight train train-agentic train-minicpm5 train-lfm25 chat llama-chat ollama-create serve clean help
 VPYTHON=$(shell pwd)/venv/bin/python3
 VPIP=$(shell pwd)/venv/bin/pip3
 CONFIG ?= config.yaml
@@ -13,6 +13,7 @@ LLAMA_HOST ?= 127.0.0.1
 LLAMA_PORT ?= 8080
 LLAMA_ARGS ?=
 LLAMA_CPP_BIN ?= $(firstword $(wildcard /home/pancake/.unsloth/llama.cpp/build/bin ../../llama.cpp/build/bin ../llama.cpp/build/bin))
+LLAMA_CLI ?= $(if $(LLAMA_CPP_BIN),$(LLAMA_CPP_BIN)/llama-cli,llama-cli)
 ifeq ($(LLAMA_CPP_BIN),)
 LLAMA_SERVER ?= llama-server
 LLAMA_LIBRARY_PATH ?= .
@@ -97,6 +98,10 @@ ollama-create:
 chat: ollama-create
 	ollama run $(OLLAMA_MODEL)
 
+llama-chat:
+	@test -f "$(MODEL_PATH)" || (echo "Missing MODEL=$(MODEL_PATH)"; exit 1)
+	"$(LLAMA_CLI)" -m "$(MODEL_PATH)" -c $(LLAMA_CTX) $(LLAMA_ARGS)
+
 # Serve the selected GGUF with llama.cpp's OpenAI-compatible server.
 serve:
 	@test -f "$(MODEL_PATH)" || (echo "Missing MODEL=$(MODEL_PATH)"; exit 1)
@@ -108,6 +113,7 @@ clean:
 	rm -rf venv
 	rm -rf output
 	rm -rf output-minicpm5
+	rm -rf output-lfm2.5
 	rm -rf __pycache__
 	rm -rf *.pyc
 	@echo "Cleanup completed."
@@ -129,6 +135,7 @@ help:
 		'  train-lfm25            Train with config.lfm2.5.yaml' \
 		'  ollama-create          Import MODEL into Ollama as OLLAMA_MODEL' \
 		'  chat                   Import MODEL and start an Ollama chat' \
+		'  llama-chat             Chat with MODEL through llama.cpp' \
 		'  serve                  Serve MODEL through llama.cpp' \
 		'  clean                  Remove venv, output directories, and Python caches' \
 		'  help                   Show this target and variable reference' \
@@ -139,7 +146,7 @@ help:
 		'  MODEL=radare2-qwen3-4b-finetuned.gguf' \
 		'  OLLAMA_MODEL=r2ai-local' \
 		'  LLAMA_CTX=4096 LLAMA_HOST=127.0.0.1 LLAMA_PORT=8080' \
-		'  LLAMA_ARGS="..." LLAMA_CPP_BIN=path LLAMA_SERVER=path' \
+		'  LLAMA_ARGS="..." LLAMA_CPP_BIN=path LLAMA_CLI=path LLAMA_SERVER=path' \
 		'  LLAMA_LIBRARY_PATH=path' \
 		'' \
 		'Usage: make -C training [target] [VARIABLE=value ...]' \

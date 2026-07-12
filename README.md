@@ -14,6 +14,7 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 
 ## Documentation
 
+* [doc/cli.md](doc/cli.md) -> primary CLI for datasets, review, training, and inference.
 * [doc/make.md](doc/make.md) -> complete root and training Make target reference.
 * [doc/learn.md](doc/learn.md) -> discover and register new agentic knowledge.
 * [doc/commands.md](doc/commands.md) -> build the radare2 command grammar dataset and memory queue.
@@ -46,10 +47,14 @@ r2ai-model commands
 r2ai-model learn
 r2ai-model verify
 r2ai-model status
+r2ai-model datasets --check
+r2ai-model review
+r2ai-model compile
+r2ai-model merge
 r2ai-model preflight
-r2ai-model train
-r2ai-model chat
-r2ai-model serve
+r2ai-model train --preset qwen
+r2ai-model chat --preset qwen
+r2ai-model serve --preset qwen
 r2ai-model play
 r2ai-model next --format json > question.json
 r2ai-model answer < answer.json

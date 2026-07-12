@@ -2,13 +2,13 @@
   "aggregate_by_category": {
     "human-reviewed": 2,
     "online-radare2-docs": 3,
-    "r2-command-help": 33,
+    "r2-command-help": 36,
     "r2js": 14,
-    "radare2-command-grammar": 36,
+    "radare2-command-grammar": 44,
     "radare2-plugin-source": 64,
     "radare2-source-docs": 57,
     "radare2-source-xrefs": 6,
-    "verified-radare2-workflows": 144,
+    "verified-radare2-workflows": 152,
     "verified-workflows": 10
   },
   "category_limits": {
@@ -39,15 +39,14 @@
     "online radare2/book resources",
     "r2js scripts"
   ],
-  "knowledge_rows": 369,
+  "knowledge_rows": 388,
   "last_new_by_category": {
-    "r2-command-help": 4,
     "radare2-command-grammar": 4,
     "verified-radare2-workflows": 4
   },
-  "last_new_rows": 12,
+  "last_new_rows": 8,
   "last_pending_rows": 0,
-  "online_mode": "auto",
+  "online_mode": "off",
   "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
   "quality_policy": [
     "dedupe by id and content_fingerprint",

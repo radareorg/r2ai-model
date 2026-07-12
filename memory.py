@@ -232,17 +232,19 @@ def memory_answer_template(topic: dict[str, Any]) -> dict[str, Any]:
 def agentic_memory_payload(topic: dict[str, Any], pending_count: int) -> dict[str, Any]:
     template = memory_answer_template(topic)
     return {
+        "status": "pending",
         "id": topic.get("id", ""),
         "pending_count": pending_count,
         "question": topic.get("question") or topic.get("topic") or "",
         "source": topic.get("source", {}),
         "submit": {
-            "stdin": "make agentic-memory-file < answer.json",
-            "file": "make agentic-memory-file FILE=answer.json",
+            "stdin": "r2ai-model answer < answer.json",
+            "file": "r2ai-model answer --file answer.json",
         },
         "tags": topic.get("tags") or [],
         "topic": topic.get("topic", ""),
         "answer_template": template,
+        "answer_format": template,
     }
 
 
@@ -270,9 +272,9 @@ def print_agentic_memory(args: argparse.Namespace) -> int:
     print("\nAnswer JSON template:")
     print(json.dumps(payload["answer_template"], ensure_ascii=False, indent=2))
     print("\nSubmit with stdin:")
-    print("  make agentic-memory-file < answer.json")
+    print("  r2ai-model answer < answer.json")
     print("\nSubmit with a file:")
-    print("  make agentic-memory-file FILE=answer.json")
+    print("  r2ai-model answer --file answer.json")
     return 0
 
 

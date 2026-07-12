@@ -21,10 +21,10 @@ The default training workflow merges these eight files:
 | `data/radare2-agentic/verified.jsonl` | 10 | Command execution and declared checks pass on local fixtures |
 | `data/r2js/verified.jsonl` | 5 | Local r2js execution and checks pass |
 | `data/reasoning-long/verified.jsonl` | 4 | Local multi-command execution and checks pass |
-| `data/agentic-knowledge/knowledge.jsonl` | 357 | Mixed executable, source-scan checked, and source-grounded knowledge |
-| `data/agentic-commands/verified.jsonl` | 3,057 | Exact current `?*` help: 1,961 trusted individual rows, 364 scoped family chunks, 294 intent-selection rows, 402 focused command lessons, and 36 verified workflow variants |
-| `data/memory/verified.jsonl` | 9 | Direct human corrections exported from accepted memory records |
-| **Current source total** | **4,168** | Expected result of a fresh merge |
+| `data/agentic-knowledge/knowledge.jsonl` | 388 | Mixed executable, source-scan checked, and source-grounded knowledge |
+| `data/agentic-commands/verified.jsonl` | 3,061 | Exact current `?*` help: 1,961 trusted individual rows, 364 scoped family chunks, 298 intent-selection rows, 402 focused command lessons, and 36 verified workflow variants |
+| `data/memory/verified.jsonl` | 10 | Direct human corrections exported from accepted memory records |
+| **Current source total** | **4,204** | Expected result of a fresh merge |
 
 The merge validates every conversation and writes a uniform training-only row
 containing `messages` and optional `tools`. It does not shuffle, split, or
@@ -40,7 +40,7 @@ training loader consumes only `messages` and optional `tools`, and
 heterogeneous verification check values cannot be represented by one inferred
 Arrow schema.
 
-The current generated artifact contains all 4,168 rows from the eight sources.
+The current generated artifact contains all 4,204 rows from the eight sources.
 The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
@@ -112,12 +112,14 @@ The public workflows are:
 make train
 make chat
 
-# The installed/source CLI exposes the same operations.
-r2ai-model train
-r2ai-model chat
+# The installed/source CLI is the preferred interface.
+r2ai-model datasets --check
+r2ai-model merge
+r2ai-model train --preset qwen
+r2ai-model chat --preset qwen
 ```
 
-`make train` and `r2ai-model train` create/update the venv, repair compatible
+`make train` and `r2ai-model train --preset qwen` create/update the venv, repair compatible
 dependencies, rebuild classic and tool-call rows, export human memory, merge all
 training-ready sources, train with LoRA by default, merge the adapter into a
 complete model, and export GGUF. `make chat` and `r2ai-model chat` import the
@@ -133,7 +135,7 @@ r2ai-model preflight --config config.minicpm5.yaml
 r2ai-model preflight --config config.lfm2.5.yaml
 ```
 
-The current 4,168-row corpus passes full preflight with the default Qwen config;
+The current 4,204-row corpus passes full preflight with the default Qwen config;
 run the same preflight after changing either alternative model dependency set.
 The included model configurations are:
 

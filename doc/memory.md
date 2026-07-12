@@ -19,6 +19,8 @@ make memory-add TOPIC="radare2 ESIL stepping" QUESTION="How should 3aes be expla
 make memory-remember TOPIC="radare2 ESIL stepping" HIGHLIGHT="3aes repeats aes three times" DETAILS="In radare2 a numeric prefix repeats the following command. aes is analysis/esil/step, so 3aes performs three ESIL steps." TAGS="radare2,esil"
 make install
 r2ai-model play
+r2ai-model review memory
+r2ai-model review memory --list
 r2ai-model next --format json
 r2ai-model answer < answer.json
 r2ai-model answer --file answer.json

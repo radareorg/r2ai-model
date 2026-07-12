@@ -1538,10 +1538,10 @@ Usage: Cs[ga-*.] ([size]) [@addr]
 | Csz [size] ([@addr])     define zero terminated strings (with size as maxlen)
 | Css ([range]) ([@addr])  define all strings found in given range or section
 Usage: Ct [.|-] [@ addr]   # Manage comments for variable types
-| Ct                        list all variable type comments
-| Ct comment-text [@ addr]  place comment at current or specified address
-| Ct. [@ addr]              show comment at current or specified address
-| Ct- [@ addr]              remove comment at current or specified address
+| Ct                                    list all variable type comments
+| Ct [base64:..|comment-text] [@ addr]  place comment at current or specified address
+| Ct. [@ addr]                          show comment at current or specified address
+| Ct- [@ addr]                          remove comment at current or specified address
 See Cvb?, Cvs? and Cvr?
 Usage: d   # Debug commands
 | d:[?] [cmd]              run custom debug plugin command
