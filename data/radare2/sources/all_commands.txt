@@ -1967,10 +1967,10 @@ Usage: e [var[=value]]  Evaluable vars
 | e!a                invert the boolean value of 'a' var
 | ec[?] [k] [color]  set color for given key (prompt, offset, ...)
 | ee [var]           open cfg.editor to change the value of var
-| ed ([file])        open editor to change the ~/.radare2rc or [file]
-| ed*                show contents of your ~/.radare2c
-| ed+                add or set an eval config line into your ~/.radare2c
-| ed-[!]             delete ~/.radare2c (Use ed-! to delete without prompting)
+| ed ([file])        open editor to change the user rc file or [file]
+| ed*                show contents of the user rc file
+| ed+                add or set an eval config line in the user rc file
+| ed-[!]             delete the user rc file (Use ed-! to delete without prompting)
 | ej                 list config vars in JSON
 | eJ                 list config vars in verbose JSON
 | en                 list environment vars

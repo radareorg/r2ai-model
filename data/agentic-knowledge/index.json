@@ -24,7 +24,7 @@
     "verified-workflows": 80
   },
   "discover_fixtures": false,
-  "growth_budget": 24,
+  "growth_budget": 0,
   "growth_sections": [
     "human-reviewed pending answers",
     "radare2 command help",
@@ -40,13 +40,10 @@
     "r2js scripts"
   ],
   "knowledge_rows": 396,
-  "last_new_by_category": {
-    "radare2-command-grammar": 4,
-    "verified-radare2-workflows": 4
-  },
-  "last_new_rows": 8,
+  "last_new_by_category": {},
+  "last_new_rows": 0,
   "last_pending_rows": 0,
-  "online_mode": "auto",
+  "online_mode": "off",
   "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
   "quality_policy": [
     "dedupe by id and content_fingerprint",

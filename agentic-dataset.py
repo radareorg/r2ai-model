@@ -851,7 +851,7 @@ def build_r2js_script_knowledge(r2_source: Path, seen: set[str] | None = None) -
         if not apis:
             continue
         ref = relative_to_r2_source(str(path), r2_source)
-        answer = f"`{ref}` is an r2js script. Summary: {summary}. Observed r2 APIs: {', '.join('r2.' + api for api in apis)}."
+        answer = f"`{ref}` is an r2js script. {summary.rstrip('.')}. It uses: {', '.join('r2.' + api for api in apis)}."
         rows.append({
             "id": row_id,
             "kind": "agentic_knowledge",
@@ -926,7 +926,7 @@ def knowledge_row(
         "source_refs": [sanitize_text(ref, r2_source) for ref in source_refs],
         "messages": knowledge_messages(
             sanitize_text(question, r2_source),
-            sanitize_text(answer, r2_source),
+            clean_training_answer(sanitize_text(answer, r2_source)),
         ),
     }
     if tags:
@@ -1016,6 +1016,55 @@ def set_assistant_text(row: dict[str, Any], content: str) -> None:
             return
 
 
+# Verification output is valuable for a maintainer, but it is not a useful
+# assistant response.  In particular, training on source-location/evidence
+# stanzas makes small models imitate that scaffold even when it does not
+# answer the user's question.  Keep the raw observation in ``verification``;
+# only the concise explanation belongs in ``messages``.
+TRAINING_PROVENANCE_BLOCK_RE = re.compile(
+    r"""(?imsx)
+    ^[ \t]*(?:
+        evidence(?:\s+(?:from|line\s+from|excerpt))?(?:\s+[^:\n]*)?
+        |(?:help|local\ help)\ evidence
+        |observed\ evidence
+        |observed\ output\ excerpt
+        |output\ excerpt
+        |executable\ workflow\ evidence
+        |`\?\*`\ excerpt
+    )\s*:\s*.*\Z
+    """
+)
+TRAINING_LOCATION_SUMMARY_LINE_RE = re.compile(
+    r"(?im)^[ \t]*(?:location|summary)\s*:[^\n]*(?:\n|$)"
+)
+
+
+def clean_training_answer(answer: str) -> str:
+    """Remove provenance scaffolding from an assistant training target.
+
+    This is deliberately applied at the source-dataset boundary as well as
+    while cleaning learned knowledge.  A future learner may produce an older
+    evidence format, but it must never become a response pattern again.
+    """
+    answer = TRAINING_PROVENANCE_BLOCK_RE.sub("", str(answer))
+    answer = TRAINING_LOCATION_SUMMARY_LINE_RE.sub("", answer)
+    answer = re.sub(r"(?i)\bsummary:\s*", "", answer)
+    answer = re.sub(r"[ \t]+\n", "\n", answer)
+    answer = re.sub(r"\n{3,}", "\n\n", answer)
+    return answer.strip()
+
+
+def cleaned_training_messages(messages: Any) -> list[dict[str, Any]]:
+    """Copy a chat row with only assistant targets cleaned for training."""
+    if not isinstance(messages, list):
+        return []
+    cleaned = copy.deepcopy(messages)
+    for message in cleaned:
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            message["content"] = clean_training_answer(str(message.get("content", "")))
+    return cleaned
+
+
 def primary_source_ref(row: dict[str, Any]) -> str:
     refs = row.get("source_refs", [])
     if isinstance(refs, list) and refs:
@@ -1076,7 +1125,8 @@ def knowledge_fingerprint(row: dict[str, Any]) -> str:
 def cleanup_knowledge_row(row: dict[str, Any]) -> dict[str, Any] | None:
     row = copy.deepcopy(row)
     topic = str(row.get("topic", ""))
-    answer = assistant_text(row)
+    answer = clean_training_answer(assistant_text(row))
+    set_assistant_text(row, answer)
     if not str(row.get("id", "")):
         return None
     if topic == "fixture.triage":
@@ -1609,7 +1659,7 @@ def build_command_grammar_knowledge(r2_bin: Path, r2_source: Path, timeout: int,
         if not ok:
             continue
         excerpt = command_grammar_excerpt(output, list(spec["needles"]), r2_source)
-        answer = f"{spec['answer']}\n\nEvidence from `?*`:\n{excerpt}"
+        answer = str(spec["answer"])
         rows.append(knowledge_row(
             row_id,
             str(spec["topic"]),
@@ -1630,13 +1680,11 @@ def build_command_grammar_knowledge(r2_bin: Path, r2_source: Path, timeout: int,
         row_id = "knowledge.command_grammar.block." + subject_id + "." + stable_hash(usage_line, length=8)
         if row_id in seen:
             continue
-        excerpt = output_excerpt("\n".join(block), 1400)
         topic = "grammar.command." + subject_id
         answer = (
             f"The full `?*` grammar describes {subject} and the variants accepted by the command parser. "
             f"Read the leftmost letters as the command family and the following letters, suffixes, or arguments as refinements. "
-            f"When building one-liners, combine the family with repeat prefixes, `@` temporary seeks, `~` grep, `j` JSON output, `*` script output, or iterators when the family supports them.\n\n"
-            f"`?*` excerpt:\n{excerpt}"
+            f"When building one-liners, combine the family with repeat prefixes, `@` temporary seeks, `~` grep, `j` JSON output, `*` script output, or iterators when the family supports them."
         )
         checks = [{"type": "contains", "value": usage_line[:120]}]
         ok, checked, _reason = evaluate_checks(output, checks)
@@ -1650,7 +1698,7 @@ def build_command_grammar_knowledge(r2_bin: Path, r2_source: Path, timeout: int,
             ["r2:?*"],
             r2_source,
             tags=["command-grammar", "r2cmd", subject_id],
-            verification=command_grammar_verification(verification, r2_source, r2_bin, checked, excerpt),
+            verification=command_grammar_verification(verification, r2_source, r2_bin, checked, output_excerpt("\n".join(block), 1400)),
             title=subject,
         ))
         seen.add(row_id)
@@ -1977,21 +2025,15 @@ def command_row_from_candidate(candidate: dict[str, Any], verification: Verifica
         summary = summary or "list all analyzed functions"
     status = "documented" if command_summary_is_useful(summary) and line else "needs-memory"
     decomposition = command_decomposition_text(command, parts)
-    answer_parts = [
-        f"`{command}` is documented by radare2 syntax `{syntax}`.",
-        f"Help scope: `{family}`; this entry is a {scope} form.",
-        f"Inferred construction: {decomposition}",
-    ]
-    if unknown:
-        answer_parts.append(
-            "Unresolved letter-level parts: " + ", ".join(f"`{part}`" for part in unknown)
-            + ". They are not guessed; the exact behavior is grounded in the help line."
-        )
     if summary:
-        answer_parts.append(f"Documented behavior: {summary}.")
+        behavior = summary.rstrip(".")
+        answer_parts = [f"Use `{syntax}` to {behavior[:1].lower() + behavior[1:]}."]
+    else:
+        answer_parts = [f"Use `{syntax}` for this radare2 command form."]
+    if not unknown and parts:
+        answer_parts.append(f"Its construction is: {decomposition}")
     if status == "needs-memory":
         answer_parts.append("This row is marked `needs-memory` because its help description is too thin to train as a standalone factual answer; ask a human to refine it with `make memory`.")
-    answer_parts.append(f"Evidence line from `{source_ref}`:\n{line}")
     question = str(candidate.get("question") or f"How does the radare2 command `{command}` work?")
     if scope == "modifier":
         question = f"How does the radare2 composition modifier `{command}` work, and what command does it attach to?"
@@ -2060,13 +2102,6 @@ def merge_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(by_command.values(), key=lambda item: safe_id_part(str(item.get("command", ""))))
 
 
-def append_assistant_section(row: dict[str, Any], section: str) -> None:
-    for message in row.get("messages", []):
-        if message.get("role") == "assistant":
-            message["content"] = str(message.get("content", "")).rstrip() + "\n\n" + section
-            return
-
-
 def enrich_command_relationships(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     command_set = {str(row.get("command")) for row in rows if row.get("command")}
     parent_by_command: dict[str, str] = {}
@@ -2099,19 +2134,6 @@ def enrich_command_relationships(rows: list[dict[str, Any]]) -> list[dict[str, A
             "children": child_commands,
         }
         row["relationships"] = relationships
-        statements = []
-        if parent:
-            statements.append(f"parent help command `{parent}`")
-        if siblings:
-            statements.append("sibling variants " + ", ".join(f"`{item}`" for item in siblings))
-        if child_commands:
-            statements.append("direct child variants " + ", ".join(f"`{item}`" for item in child_commands))
-        if statements:
-            append_assistant_section(
-                row,
-                "Documented relationships: " + "; ".join(statements)
-                + ". These links come from shared help-family and command-prefix structure; behavior still comes from each exact help line.",
-            )
         row["content_fingerprint"] = stable_hash(
             row.get("content_fingerprint", ""),
             json.dumps(relationships, sort_keys=True),
@@ -2145,15 +2167,6 @@ def enrich_command_workflow_usage(rows: list[dict[str, Any]]) -> tuple[list[dict
                 "source_refs": list(item.get("source_refs", []))[:4],
             })
         row["workflow_examples"] = examples
-        rendered = []
-        for example in examples:
-            ids = ", ".join(f"`{value}`" for value in example["knowledge_ids"])
-            rendered.append(f"`{example['expression']}` ({ids or 'executable knowledge row'})")
-        append_assistant_section(
-            row,
-            "Executable workflow evidence: " + "; ".join(rendered)
-            + ". These expressions were observed in locally checked agentic rows and demonstrate arguments or composition around this help command.",
-        )
         refs = list(row.get("source_refs", []))
         for example in examples:
             refs.extend(str(ref) for ref in example["source_refs"])
@@ -2290,12 +2303,9 @@ def command_selection_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         workflow_examples = list(row.get("workflow_examples", []))
         if workflow_examples:
             answer += f" A locally checked workflow uses `{workflow_examples[0].get('expression')}`."
-        evidence = str((row.get("verification") or {}).get("output_excerpt", "")).strip()
-        if evidence:
-            answer += "\n\nHelp evidence:\n" + evidence
         row_id = "agentic.command-selection." + safe_id_part(command) + "." + stable_hash(row.get("id"), summary, length=10)
         output.append({
-            "content_fingerprint": stable_hash(command, syntax, summary, family, evidence),
+            "content_fingerprint": stable_hash(command, syntax, summary, family),
             "family": family,
             "id": row_id,
             "kind": "agentic_command_selection",
@@ -2377,14 +2387,11 @@ def focused_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         relationship_text = f"It belongs under `{parent}`." if parent else ""
         if related:
             relationship_text += " Nearby commands solve different parts of the workflow: " + "; ".join(related) + "."
-        evidence = str((row.get("verification") or {}).get("output_excerpt", "")).strip()
         common = (
             f"Use `{syntax}`. In radare2's {domain} commands, `{command}` is documented as: {summary}. "
             f"{prerequisite} {relationship_text}\n\n"
             f"Verify the result from the command's printed output before making the next decision."
         )
-        if evidence:
-            common += "\n\nLocal help evidence:\n" + evidence
         prompts = [
             f"Within the `{parent or row.get('family')}` family, I need to {summary}. Which radare2 command should I use, and what setup does it depend on?",
             f"Place `{command}` in a reliable {domain} workflow. Explain its exact syntax, prerequisites, and nearby commands that should not be confused with it.",
@@ -2716,22 +2723,11 @@ def focused_workflow_rows(
             })
             continue
         commands = "\n".join(f"- `{command}`" for command in spec["commands"] if not command.startswith("?e ") and command != "dk 9")
-        native_debug = "-d" in spec.get("r2_args", [])
-        if native_debug:
-            observation = (
-                f"The native-debug sequence completed and all {len(spec['checks'])} declared output checks passed. "
-                "Runtime addresses are intentionally omitted because ASLR makes them target-run-specific."
-            )
-        else:
-            observation = output_excerpt(sanitize_text(verification.output, r2_source), 1400)
         answer = (
-            f"{spec['answer']}\n\nVerified command sequence:\n{commands}\n\n"
-            f"Observed evidence:\n{observation}"
+            f"{spec['answer']}\n\nCommand sequence:\n{commands}\n\n"
+            "All declared local validation checks passed."
         )
         summary = verification_summary(verification, r2_source, verifier_bin)
-        if native_debug:
-            summary["output_excerpt"] = observation
-            summary["output_sha256"] = hashlib.sha256(observation.encode("utf-8")).hexdigest()
         for variant, question in enumerate(spec["prompts"], 1):
             row_id = f"agentic.command-workflow.{spec['id']}.v{variant}"
             rows.append({
@@ -2760,11 +2756,12 @@ def command_training_rows(rows: list[dict[str, Any]], family_rows: list[dict[str
         # but do not teach the uncertain decomposition to the model.
         if row.get("status") not in {"documented", "human-reviewed"}:
             continue
+        messages = cleaned_training_messages(row.get("messages", []))
         out.append({
-            "content_fingerprint": row.get("content_fingerprint", ""),
+            "content_fingerprint": stable_hash(row.get("content_fingerprint", ""), json.dumps(messages, sort_keys=True)),
             "id": row.get("id", ""),
             "kind": row.get("kind", "agentic_command"),
-            "messages": row.get("messages", []),
+            "messages": messages,
             "source_refs": row.get("source_refs", []),
             "tags": row.get("tags", []),
             "topic": row.get("topic", ""),
@@ -2811,6 +2808,17 @@ def validate_command_outputs(
     ]
     if malformed_messages:
         raise ValueError("command training row has malformed conversation roles")
+    provenance_scaffold = [
+        row for row in training_rows
+        if any(
+            message.get("role") == "assistant"
+            and clean_training_answer(str(message.get("content", ""))) != str(message.get("content", "")).strip()
+            for message in row.get("messages", [])
+            if isinstance(message, dict)
+        )
+    ]
+    if provenance_scaffold:
+        raise ValueError("verification evidence leaked into command training export")
     return {
         "evidence_backed_command_rows": len([
             row for row in rows if has_successful_evidence(row)
@@ -2940,19 +2948,16 @@ def command_memory_answer_section(memories: list[dict[str, Any]]) -> str:
     for memory in memories:
         highlight = str(memory.get("highlight", "")).strip()
         details = str(memory.get("details", "")).strip()
-        memory_id = str(memory.get("id", "")).strip()
         body = []
         if highlight:
             body.append(highlight)
         if details:
-            body.append("Details:\n" + details)
-        if memory_id:
-            body.append(f"Memory id: {memory_id}")
+            body.append(details)
         if body:
             sections.append("\n".join(body))
     if not sections:
         return ""
-    return "Human memory:\n" + "\n\n".join(sections)
+    return "\n\n".join(sections)
 
 
 def strip_needs_memory_notice(answer: str) -> str:
@@ -4287,8 +4292,7 @@ def r2r_workflow_answer(fixture: str, commands: list[str], expected: str, verifi
     return (
         f"{opener}\n\n"
         f"Command sequence:\n{display_commands}\n\n"
-        f"Use these output fragments as the validation signal: {expected}.\n\n"
-        f"Observed output excerpt:\n{output_excerpt(sanitize_text(verification.output, r2_source), 1400)}"
+        f"Validate the result against: {expected}."
     )
 
 
@@ -4396,7 +4400,7 @@ def build_experiment_knowledge(r2_bin: Path, r2_source: Path, timeout: int, seen
         verification = run_entry(entry, r2_bin, r2_source, timeout)
         if verification.ok:
             commands = "\n".join(f"- `{cmd}`" for cmd in plan["commands"])
-            answer = f"{plan['answer']}\n\nVerified command sequence:\n{commands}\n\nEvidence excerpt:\n{output_excerpt(sanitize_text(verification.output, r2_source), 1800)}"
+            answer = f"{plan['answer']}\n\nCommand sequence:\n{commands}\n\nAll declared local validation checks passed."
             rows.append(knowledge_row(
                 row_id,
                 str(plan["topic"]),
