@@ -4,12 +4,12 @@
     "online-radare2-docs": 3,
     "r2-command-help": 36,
     "r2js": 14,
-    "radare2-command-grammar": 48,
+    "radare2-command-grammar": 57,
     "radare2-plugin-source": 64,
     "radare2-source-docs": 57,
     "radare2-source-xrefs": 6,
     "verified-radare2-workflows": 156,
-    "verified-workflows": 10
+    "verified-workflows": 18
   },
   "category_limits": {
     "human-reviewed": 1000,
@@ -24,7 +24,7 @@
     "verified-workflows": 80
   },
   "discover_fixtures": false,
-  "growth_budget": 0,
+  "growth_budget": 8,
   "growth_sections": [
     "human-reviewed pending answers",
     "radare2 command help",
@@ -39,9 +39,11 @@
     "online radare2/book resources",
     "r2js scripts"
   ],
-  "knowledge_rows": 396,
-  "last_new_by_category": {},
-  "last_new_rows": 0,
+  "knowledge_rows": 413,
+  "last_new_by_category": {
+    "verified-workflows": 8
+  },
+  "last_new_rows": 8,
   "last_pending_rows": 0,
   "online_mode": "off",
   "path_policy": "fixtures and source refs are relative to R2_SOURCE; local home/temp paths are sanitized",
@@ -55,5 +57,5 @@
     "cap verified r2r workflow rows per source file to avoid low-entropy growth",
     "source bug-hunt findings are written to R2BUGS.md, not training knowledge rows"
   ],
-  "section_budget": 4
+  "section_budget": 8
 }

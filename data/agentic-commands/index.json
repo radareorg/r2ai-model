@@ -3,7 +3,7 @@
   "command_family_rows": 363,
   "command_rows": 1999,
   "command_scope_rows": 1958,
-  "command_selection_rows": 300,
+  "command_selection_rows": 312,
   "documented_rows": 1948,
   "focused_command_rows": 402,
   "help_snapshot": "data/radare2/sources/all_commands.txt",
@@ -11,7 +11,7 @@
   "help_snapshot_sha256": "690dac99563780911bceb891e0f470e62343926fe9cd97bbb058ef5937450490",
   "human_reviewed_rows": 12,
   "knowledge_memory_topics": 24,
-  "last_changed_rows": 1999,
+  "last_changed_rows": 37,
   "memory_rows_applied": 10,
   "memory_topics": 24,
   "memory_topics_queued": 0,
@@ -32,10 +32,10 @@
     "data/radare2/sources/all_commands.txt"
   ],
   "synthetic_memory_rows": 3,
-  "training_rows": 3061,
-  "updated_at": "2026-07-12T15:05:27Z",
+  "training_rows": 3073,
+  "updated_at": "2026-07-12T17:09:56Z",
   "verified_workflow_rows": 36,
   "verified_workflow_specs": 18,
-  "workflow_linked_rows": 145,
+  "workflow_linked_rows": 165,
   "workflow_radare2_version": "radare2 6.1.2 +35684 abi:78 @ linux-arm_64"
 }
