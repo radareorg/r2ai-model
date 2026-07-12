@@ -59,7 +59,10 @@ parent/sibling relationships, and locally checked workflow uses are retained;
 context-local help keys are not mislabeled as standalone commands. Optional
 OpenAI-compatible support proposes questions only. The target queues the small
 remaining set of weak descriptions into `data/memory/topics.jsonl` for human
-correction.
+correction. A focused curriculum adds analysis, ESIL emulation, and debugger
+lessons plus output-checked workflows to
+`data/agentic-commands/focused-workflows.jsonl`; all trusted rows are folded into
+the normal `verified.jsonl` training export.
 
 ```sh
 make agentic-commands

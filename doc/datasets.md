@@ -22,9 +22,9 @@ The default training workflow merges these eight files:
 | `data/r2js/verified.jsonl` | 5 | Local r2js execution and checks pass |
 | `data/reasoning-long/verified.jsonl` | 4 | Local multi-command execution and checks pass |
 | `data/agentic-knowledge/knowledge.jsonl` | 357 | Mixed executable, source-scan checked, and source-grounded knowledge |
-| `data/agentic-commands/verified.jsonl` | 2,584 | Exact current `?*` help: 1,932 individual command rows, 360 scoped family chunks, and 292 balanced intent-selection rows |
+| `data/agentic-commands/verified.jsonl` | 3,057 | Exact current `?*` help: 1,961 trusted individual rows, 364 scoped family chunks, 294 intent-selection rows, 402 focused command lessons, and 36 verified workflow variants |
 | `data/memory/verified.jsonl` | 9 | Direct human corrections exported from accepted memory records |
-| **Current source total** | **3,695** | Expected result of a fresh merge |
+| **Current source total** | **4,168** | Expected result of a fresh merge |
 
 The merge validates every conversation and writes a uniform training-only row
 containing `messages` and optional `tools`. It does not shuffle, split, or
@@ -40,7 +40,7 @@ training loader consumes only `messages` and optional `tools`, and
 heterogeneous verification check values cannot be represented by one inferred
 Arrow schema.
 
-The current generated artifact contains all 3,695 rows from the eight sources.
+The current generated artifact contains all 4,168 rows from the eight sources.
 The active training configs use a 2,048-token limit, which contains the current
 longest row (1,836 tokens with the local Qwen chat template) without truncation.
 Batch padding remains dynamic, so shorter command examples retain their natural
@@ -133,7 +133,7 @@ r2ai-model preflight --config config.minicpm5.yaml
 r2ai-model preflight --config config.lfm2.5.yaml
 ```
 
-The current 3,695-row corpus passes full preflight with the default Qwen config;
+The current 4,168-row corpus passes full preflight with the default Qwen config;
 run the same preflight after changing either alternative model dependency set.
 The included model configurations are:
 

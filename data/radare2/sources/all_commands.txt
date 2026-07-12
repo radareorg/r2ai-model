@@ -926,6 +926,7 @@ Usage: ar  # Analysis Registers
 | ars                   stack register state
 | arS                   show the size of the register profile
 | art                   list all register types
+| arv[?]                show vector registers (also known as sve / packed / vector)
 | arw <hexnum>          set contents of the register arena
 Usage: ara[+-s]  register Arena Push/Pop/Swap
 | ara   show all register arenas allocated
@@ -944,6 +945,24 @@ Usage: arp   # Register profile commands
 | arps [new fake size]         get or set the register profile size
 | arpg                         show register profile comments
 | NOTE:                        this help will show arp if you run drp? when cfg.debug=0
+Usage: arv  [reg] [idx] [wordsize] [= value]  Show analysis vector packed registers
+| arv                 show XMM registers
+| arv xmm0            show all packings of xmm0
+| arv xmm0 0 32 = 12  set the first 32 bit word of the xmm0 reg to 12
+| arvb [reg]          show registers as bytes
+| arvw [reg]          show registers as words
+| arvd [reg]          show registers as doublewords
+| arvq [reg]          show registers as quadwords
+| arvq xmm0~[0]       show first quadword of xmm0
+| arvf [reg]          show registers as 32-bit floating point
+| arvl [reg]          show registers as 64-bit floating point
+| arvyb [reg]         show YMM registers as bytes
+| arvyw [reg]         show YMM registers as words
+| arvyd [reg]         show YMM registers as doublewords
+| arvyq [reg]         show YMM registers as quadwords
+| arvq ymm0~[3]       show fourth quadword of ymm0
+| arvyf [reg]         show YMM registers as 32-bit floating point
+| arvyl [reg]         show YMM registers as 64-bit floating point
 Usage: aes[pbosu]  esil stepping utilities
 | aesp [X] [N]                   evaluate N instr from offset X
 | aesb                           step back
@@ -1079,7 +1098,10 @@ Usage: afs[r]   Analyze function signatures
 | afsr [function_name] [new_type]  change type for given function
 | afsv[j]                          print function signature filling the values from current reg and stack state
 Usage: aft
-| aft  type matching analysis for current function
+| aft    type matching analysis for current function
+| afts   synthesize struct types from pointer-argument access patterns and apply them to the args
+| afts*  show the synthesis as r2 commands without applying anything
+| aftsj  apply the synthesis and report it in json
 Usage: afv[rbs]   Function variables manipulation
 | afv*                          output r2 command to add args/locals to flagspace
 | afv-([name])                  remove all or given var
@@ -1190,6 +1212,7 @@ Usage: ah[lba-]  analysis Hints
 | aho call                     change opcode type (see aho?)
 | ahp addr                     set pointer hint
 | ahr val                      set hint for return value of a function
+| ahR text                     set register-use comment hint
 | ahs 4                        set opcode size=4
 | ahS jz                       set asm.syntax=jz for this opcode
 | aht[?][s] <type>             mark immediate as a type offset (deprecated, moved to "aho")
@@ -1281,6 +1304,7 @@ Usage: ar  # Analysis Registers
 | ars                   stack register state
 | arS                   show the size of the register profile
 | art                   list all register types
+| arv[?]                show vector registers (also known as sve / packed / vector)
 | arw <hexnum>          set contents of the register arena
 Usage: ara[+-s]  register Arena Push/Pop/Swap
 | ara   show all register arenas allocated
@@ -1299,6 +1323,24 @@ Usage: arp   # Register profile commands
 | arps [new fake size]         get or set the register profile size
 | arpg                         show register profile comments
 | NOTE:                        this help will show arp if you run drp? when cfg.debug=0
+Usage: arv  [reg] [idx] [wordsize] [= value]  Show analysis vector packed registers
+| arv                 show XMM registers
+| arv xmm0            show all packings of xmm0
+| arv xmm0 0 32 = 12  set the first 32 bit word of the xmm0 reg to 12
+| arvb [reg]          show registers as bytes
+| arvw [reg]          show registers as words
+| arvd [reg]          show registers as doublewords
+| arvq [reg]          show registers as quadwords
+| arvq xmm0~[0]       show first quadword of xmm0
+| arvf [reg]          show registers as 32-bit floating point
+| arvl [reg]          show registers as 64-bit floating point
+| arvyb [reg]         show YMM registers as bytes
+| arvyw [reg]         show YMM registers as words
+| arvyd [reg]         show YMM registers as doublewords
+| arvyq [reg]         show YMM registers as quadwords
+| arvq ymm0~[3]       show fourth quadword of ymm0
+| arvyf [reg]         show YMM registers as 32-bit floating point
+| arvyl [reg]         show YMM registers as 64-bit floating point
 Usage: as[ljk?]  syscall name <-> number utility
 | as           show current syscall and arguments
 | as 4         show syscall 4 based on asm.os and current regs/mem
@@ -1787,6 +1829,24 @@ Usage: ara[+-s]  register Arena Push/Pop/Swap
 | ara+  push a new register arena for each type
 | ara-  pop last register arena
 | aras  swap last two register arenas
+Usage: drv  [reg] [idx] [wordsize] [= value]  Show vector packed registers
+| drv                 show XMM registers
+| drv xmm0            show all packings of xmm0
+| drv xmm0 0 32 = 12  set the first 32 bit word of the xmm0 reg to 12
+| drvb [reg]          show registers as bytes
+| drvw [reg]          show registers as words
+| drvd [reg]          show registers as doublewords
+| drvq [reg]          show registers as quadwords
+| drvq xmm0~[0]       show first quadword of xmm0
+| drvf [reg]          show registers as 32-bit floating point
+| drvl [reg]          show registers as 64-bit floating point
+| drvyb [reg]         show YMM registers as bytes
+| drvyw [reg]         show YMM registers as words
+| drvyd [reg]         show YMM registers as doublewords
+| drvyq [reg]         show YMM registers as quadwords
+| drvq ymm0~[3]       show fourth quadword of ymm0
+| drvyf [reg]         show YMM registers as 32-bit floating point
+| drvyl [reg]         show YMM registers as 64-bit floating point
 Usage: arp   # Register profile commands
 | arp                          show the current register profile
 | arp [regprofile-file]        set the current register profile

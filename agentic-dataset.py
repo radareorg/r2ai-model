@@ -42,6 +42,7 @@ COMMANDS_DIR = ROOT / "data" / "agentic-commands"
 COMMANDS_DB_PATH = COMMANDS_DIR / "commands.jsonl"
 COMMANDS_FAMILIES_PATH = COMMANDS_DIR / "families.jsonl"
 COMMANDS_SELECTION_PATH = COMMANDS_DIR / "selection.jsonl"
+COMMANDS_FOCUSED_PATH = COMMANDS_DIR / "focused-workflows.jsonl"
 COMMANDS_TRAINING_PATH = COMMANDS_DIR / "verified.jsonl"
 COMMANDS_INDEX_PATH = COMMANDS_DIR / "index.json"
 COMMANDS_MEMORY_TOPICS_PATH = COMMANDS_DIR / "memory-topics.jsonl"
@@ -465,7 +466,7 @@ def run_entry(entry: dict[str, Any], r2_bin: Path, r2_source: Path, timeout: int
             args = build_r2_args(entry, r2_bin, r2_source)
         proc = subprocess.run(
             args,
-            cwd=str(r2_source if r2_source.is_dir() else ROOT),
+            cwd=str(entry.get("run_cwd") or (r2_source if r2_source.is_dir() else ROOT)),
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -607,6 +608,9 @@ GROWTH_HELP_TOPICS = HELP_TOPICS + [
     ("cmd.analysis.function", "af?", "Function analysis command family", ["libr/core/cmd_anal.inc.c"]),
     ("cmd.analysis.refs", "ax?", "Reference management command family", ["libr/core/cmd_anal.inc.c"]),
     ("cmd.analysis.ops", "ao?", "Opcode analysis command family", ["libr/core/cmd_anal.inc.c"]),
+    ("cmd.esil", "ae?", "ESIL analysis and emulation command family", ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"]),
+    ("cmd.esil.init", "aei?", "ESIL virtual-machine initialization help", ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"]),
+    ("cmd.esil.step", "aes?", "ESIL stepping command family", ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes", "test/db/cmd/cmd_aesb"]),
     ("cmd.graph", "ag?", "Graph generation command family", ["libr/core/cmd_anal.inc.c"]),
     ("cmd.info.imports", "ii?", "Import listing command family", ["libr/core/cmd_info.inc.c"]),
     ("cmd.info.sections", "iS?", "Section listing command family", ["libr/core/cmd_info.inc.c"]),
@@ -623,6 +627,10 @@ GROWTH_HELP_TOPICS = HELP_TOPICS + [
     ("cmd.sections", "S?", "Section command family", ["libr/core/cmd_section.inc.c"]),
     ("cmd.debug", "d?", "Debug command family", ["libr/core/cmd_debug.inc.c"]),
     ("cmd.debug.breakpoints", "db?", "Breakpoint command family", ["libr/core/cmd_debug.inc.c"]),
+    ("cmd.debug.continue", "dc?", "Debugger continuation command family", ["libr/core/cmd_debug.inc.c"]),
+    ("cmd.debug.process", "dp?", "Debugger process command family", ["libr/core/cmd_debug.inc.c"]),
+    ("cmd.debug.registers", "dr?", "Debugger register command family", ["libr/core/cmd_debug.inc.c", "test/db/cmd/cmd_dr"]),
+    ("cmd.debug.step", "ds?", "Debugger stepping command family", ["libr/core/cmd_debug.inc.c"]),
     ("cmd.debug.memory", "dm?", "Debug memory map command family", ["libr/core/cmd_debug.inc.c"]),
 ]
 
@@ -2305,6 +2313,445 @@ def command_selection_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+FOCUSED_COMMANDS = set("""
+aa aaa aaaa aac aad aae aaef aaex aaf aai aaj aan aap aar aarj aas aau aav
+af af+ af- afb afb. afb, afb+ afbi afbj afbr afc afcf afd afi afil afiq afis
+afl afl. afl, afl* afl= aflc aflj afll aflq afls aflx afn afna afo afr afs afsj
+aft afu afv afva afvn afvx afx
+ax ax* ax- ax-* ax. axC axc axd axf axff axfj axfq axg axj axl axq axr axs axt
+axtj axtq axw
+ae aea aeb aec aecc aecs aecu aecue aef aefa aeg aei aeim aeip aeis aer aes
+aesB aesb aeso aesou aesp aess aesu aesue aesuo aet
+db db. db* db-*|addr dbi dbi- dbid dbie dbj dbs dbt dbtj dbw
+dc dcc dcco dce dcp dcr dcs dcs* dcu
+dm dm= dm. dm* dm- dmS dmd dmi dmi. dmj dmm dmmj dmp dmp. dms dms- dms.
+dms+ dms* dmsj dmsw
+dp dp- dp= dpa dpe dpk dpl dplj dpq dpt dpt. dpt= dptj
+dr dr. dr, dr= dr0 dr? dr?? dra drd dre drf drl drn dro drp drr drrj drs
+drs+ drs- drt drv drx
+ds dsb dsf dsi dsl dso dsp dss dsu dsue dsuf dsui dsuir dsuo
+""".split())
+
+
+def focused_command_domain(command: str) -> tuple[str, str, list[str]]:
+    if command.startswith(("aa", "af", "ax")):
+        return (
+            "static analysis",
+            "Open the binary, run an analysis pass such as `aaa` when the task needs discovered functions or xrefs, and use `@ address-or-flag` to operate without a separate seek.",
+            ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_af", "test/db/cmd/cmd_afl"],
+        )
+    if command.startswith("ae"):
+        return (
+            "ESIL emulation",
+            "Set the intended architecture and bit width, initialize ESIL with `aei`, normally create a stack with `aeim`, and initialize the emulated PC with `aeip` or `aer PC=value` before stepping.",
+            ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes", "test/db/cmd/cmd_aesb"],
+        )
+    return (
+        "native debugging",
+        "Start or attach to a live target (`r2 -d program` or `r2 -d pid://PID`) and keep in mind that concrete register names are architecture-specific; aliases such as `PC`, `SP`, and `A0` come from the register profile.",
+        ["libr/core/cmd_debug.inc.c", "test/db/cmd/cmd_dr"],
+    )
+
+
+def focused_command_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build dense, source-backed lessons for the core analysis/emulation/debug set."""
+    by_command = {str(row.get("command", "")): row for row in rows}
+    output: list[dict[str, Any]] = []
+    for command in sorted(FOCUSED_COMMANDS, key=lambda value: (safe_id_part(value), value)):
+        row = by_command.get(command)
+        if not row or row.get("status") not in {"documented", "human-reviewed"}:
+            continue
+        syntax = str(row.get("syntax") or command)
+        summary = str(row.get("summary", "")).strip().rstrip(".")
+        if not command_summary_is_useful(summary):
+            continue
+        domain, prerequisite, refs = focused_command_domain(command)
+        relationships = row.get("relationships") or {}
+        parent = str(relationships.get("parent") or row.get("family") or "")
+        siblings = [str(value) for value in relationships.get("siblings", []) if str(value) in FOCUSED_COMMANDS]
+        related = []
+        for sibling in siblings[:3]:
+            sibling_row = by_command.get(sibling)
+            if sibling_row:
+                related.append(f"`{sibling}` ({str(sibling_row.get('summary', '')).strip().rstrip('.')})")
+        relationship_text = f"It belongs under `{parent}`." if parent else ""
+        if related:
+            relationship_text += " Nearby commands solve different parts of the workflow: " + "; ".join(related) + "."
+        evidence = str((row.get("verification") or {}).get("output_excerpt", "")).strip()
+        common = (
+            f"Use `{syntax}`. In radare2's {domain} commands, `{command}` is documented as: {summary}. "
+            f"{prerequisite} {relationship_text}\n\n"
+            f"Verify the result from the command's printed output before making the next decision."
+        )
+        if evidence:
+            common += "\n\nLocal help evidence:\n" + evidence
+        prompts = [
+            f"Within the `{parent or row.get('family')}` family, I need to {summary}. Which radare2 command should I use, and what setup does it depend on?",
+            f"Place `{command}` in a reliable {domain} workflow. Explain its exact syntax, prerequisites, and nearby commands that should not be confused with it.",
+        ]
+        for variant, question in enumerate(prompts, 1):
+            row_id = f"agentic.command-focus.{safe_id_part(command)}.{stable_hash(command, length=6)}.v{variant}"
+            output.append({
+                "content_fingerprint": stable_hash(command, variant, syntax, summary, common),
+                "family": row.get("family", ""),
+                "id": row_id,
+                "kind": "agentic_command_focus",
+                "messages": [
+                    {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": common},
+                ],
+                "source_refs": list(dict.fromkeys([*row.get("source_refs", []), *refs])),
+                "status": row.get("status"),
+                "tags": ["agentic-command", "focused-curriculum", domain.replace(" ", "-"), command],
+                "topic": f"command-focus.{safe_id_part(command)}",
+                "verification": copy.deepcopy(row.get("verification", {})),
+            })
+    return output
+
+
+def focused_workflow_specs(r2_source: Path) -> list[dict[str, Any]]:
+    hello = "test/bins/elf/hello_world"
+    native = "/bin/ls" if Path("/bin/ls").is_file() else ""
+    specs: list[dict[str, Any]] = [
+        {
+            "id": "analysis.function-count-before-after",
+            "topic": "workflow.analysis.function-count",
+            "fixture": hello,
+            "commands": ["?e BEFORE_ANALYSIS", "aflc", "aaa", "?e AFTER_ANALYSIS", "aflc"],
+            "checks": [{"type": "regex", "value": r"(?s)BEFORE_ANALYSIS\s+0\s+AFTER_ANALYSIS\s+[1-9][0-9]*"}],
+            "prompts": [
+                "How can I count analyzed functions and prove that `aaa` populated the function database?",
+                "Build a radare2 workflow that distinguishes `aflc` from analysis itself.",
+            ],
+            "answer": "`aflc` only counts functions currently present in the analysis database; it does not discover them. Run `aflc` before analysis to establish a baseline, execute `aaa`, then run `aflc` again. Use `afl` when you need the actual function rows rather than only the number.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_afl"],
+            "tags": ["analysis", "aaa", "aflc", "function-inventory"],
+        },
+        {
+            "id": "analysis.function-output-modes",
+            "topic": "workflow.analysis.function-output",
+            "fixture": hello,
+            "commands": ["aaa", "?e TEXT", "afl~main", "?e COUNT", "aflc", "?e JSON", "aflj~main"],
+            "checks": [{"type": "contains", "value": "TEXT\n"}, {"type": "contains", "value": "main"}, {"type": "regex", "value": r"(?m)^COUNT\n[1-9][0-9]*$"}, {"type": "contains", "value": "\"name\":\"main\""}],
+            "prompts": [
+                "When should an agent use `afl`, `aflc`, or `aflj`?",
+                "Show text, count-only, and JSON ways to inspect analyzed functions in radare2.",
+            ],
+            "answer": "After analysis, use `afl` for human-readable function rows, `aflc` when only the count is needed, and `aflj` for structured automation. Console filtering such as `afl~main` is convenient interactively; scripts should prefer `aflj` and parse the `name`, `offset`, and size fields.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_afl"],
+            "tags": ["analysis", "afl", "aflc", "aflj", "json"],
+        },
+        {
+            "id": "analysis.function-and-block-details",
+            "topic": "workflow.analysis.function-details",
+            "fixture": hello,
+            "commands": ["aaa", "?e FUNCTION", "afi @ main", "?e BLOCKS", "afbj @ main"],
+            "checks": [{"type": "contains", "value": "name: main"}, {"type": "contains", "value": "num-bbs:"}, {"type": "contains", "value": "\"instrs\":"}],
+            "prompts": [
+                "How do I move from a function list to detailed function and basic-block data?",
+                "Plan a structured inspection of `main` using `afi` and `afbj`.",
+            ],
+            "answer": "Use `afl` to choose a function, `afi @ main` for function metadata, and `afbj @ main` for machine-readable basic blocks and their jump/fail edges. The `@ main` modifier applies each command at the function without requiring a permanent seek.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_af"],
+            "tags": ["analysis", "afi", "afbj", "basic-blocks"],
+        },
+        {
+            "id": "analysis.xrefs-to-and-from",
+            "topic": "workflow.analysis.xrefs",
+            "fixture": hello,
+            "commands": ["aaa", "?e TO_PUTS", "axt @ sym.imp.puts", "?e FROM_MAIN", "axff @ main"],
+            "checks": [{"type": "contains", "value": "call sym.imp.puts"}, {"type": "contains", "value": "CALL"}, {"type": "contains", "value": "sym.imp.strlen"}],
+            "prompts": [
+                "Explain and demonstrate the difference between xrefs to a symbol and refs from a function.",
+                "How can I find callers of `puts` and then enumerate what `main` references?",
+            ],
+            "answer": "Direction matters: `axt @ sym.imp.puts` lists references *to* `puts`, which identifies callers. `axff @ main` lists references *from* the whole `main` function, including calls, strings, and code edges. Analyze first so both the function and xref databases exist.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_ax"],
+            "tags": ["analysis", "xrefs", "axt", "axff"],
+        },
+        {
+            "id": "analysis.reconstruct-functions",
+            "topic": "workflow.analysis.script-output",
+            "fixture": hello,
+            "commands": ["aaa", "afl*~main"],
+            "checks": [{"type": "contains", "value": "'f main"}, {"type": "contains", "value": "'af+"}],
+            "prompts": [
+                "How can I export analyzed function definitions as replayable radare2 commands?",
+                "What is the relationship between `afl` and `afl*`?",
+            ],
+            "answer": "`afl` displays functions, while `afl*` emits radare2 commands that reconstruct them. This script form is useful for inspection or replay; review it before applying it to another binary because addresses and analysis facts are target-specific.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_afl"],
+            "tags": ["analysis", "afl", "script-output"],
+        },
+        {
+            "id": "analysis.rename-function",
+            "topic": "workflow.analysis.rename-function",
+            "fixture": hello,
+            "commands": ["aaa", "afn training_main @ main", "afl~training_main"],
+            "checks": [{"type": "contains", "value": "training_main"}],
+            "prompts": [
+                "How do I rename an analyzed function and verify the new name?",
+                "Demonstrate an `afn` workflow without modifying the input file on disk.",
+            ],
+            "answer": "Run analysis, rename with `afn training_main @ main`, and confirm with `afl~training_main` or `afi @ training_main`. The rename changes radare2's in-memory analysis metadata and flags; it does not rewrite the binary's symbol table on disk.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_af"],
+            "tags": ["analysis", "afn", "metadata"],
+        },
+        {
+            "id": "esil.step-and-repeat",
+            "topic": "workflow.esil.step",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["wx 404040", "aei", "aeim", "aer eax=0", "aer eip=0", "?e ONE", "aes", "aer eax", "aer eip", "?e THREE", "2aes", "aer eax", "aer eip"],
+            "checks": [{"type": "regex", "value": r"(?s)ONE\s+0x00000001\s+0x00000001.*THREE\s+0x00000003\s+0x00000003"}],
+            "prompts": [
+                "How do `aes` and a numeric repeat prefix change ESIL registers?",
+                "Create a deterministic three-instruction ESIL stepping example.",
+            ],
+            "answer": "Initialize ESIL, its stack, and the emulated registers before stepping. One `aes` executes one `inc eax`; `2aes` then repeats the step twice, so three instructions have run and both `eax` and `eip` reach 3. Repeat prefixes apply to the following radare2 command.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"],
+            "tags": ["emulation", "esil", "aes", "repeat-prefix"],
+        },
+        {
+            "id": "esil.register-decimal-hex",
+            "topic": "workflow.registers.values",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "64"],
+            "commands": ["aei", "aeim", "?e HEX", "dr rax=0x33", "dr rax", "?e DECIMAL", "dr rax=33", "dr rax"],
+            "checks": [{"type": "regex", "value": r"(?s)HEX.*0x0*33.*DECIMAL.*0x0*21"}],
+            "prompts": [
+                "How do I read and set `rax`, and why do `33` and `0x33` produce different values?",
+                "Demonstrate `dr rax` and `dr rax=value` with unambiguous numeric bases.",
+            ],
+            "answer": "Read with `dr rax` and assign with `dr rax=value`. Radare2's numeric parser treats `0x33` as hexadecimal 0x33, while bare `33` is decimal and displays as 0x21. Use the `0x` prefix whenever the intended value is hexadecimal. Concrete names such as `rax` depend on the active register profile.",
+            "refs": ["libr/core/cmd_debug.inc.c", "test/db/cmd/cmd_dr"],
+            "tags": ["registers", "dr", "rax", "numeric-base"],
+        },
+        {
+            "id": "esil.pc-alias",
+            "topic": "workflow.registers.aliases",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "64"],
+            "commands": ["aei", "aeim", "aer PC=0x10", "?e AER", "aer PC", "?e DR", "dr PC", "dr rip"],
+            "checks": [{"type": "regex", "value": r"(?s)AER\s+0x0*10.*DR\s+0x0*10\s+0x0*10"}],
+            "prompts": [
+                "How do `aer`, `dr`, `PC`, and the architecture register `rip` relate in ESIL?",
+                "Show a portable way to address the program counter during emulation.",
+            ],
+            "answer": "`aer` is the ESIL-focused register command, while `dr` uses the active register profile and also works with this initialized ESIL state. `PC` is a role alias; on x86-64 it resolves to `rip`. Prefer `PC` in architecture-neutral workflows and the concrete name when architecture specificity is intentional.",
+            "refs": ["libr/core/cmd_anal.inc.c", "libr/core/cmd_debug.inc.c"],
+            "tags": ["emulation", "registers", "aer", "dr", "aliases"],
+        },
+        {
+            "id": "esil.step-over-vs-skip",
+            "topic": "workflow.esil.calls",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["wx e803000000909090b878560000c3", "aei", "aeim", "aer eax=0", "aer eip=0", "aess", "?e SKIP", "aer eip", "aer eax", "aer eax=0", "aer eip=0", "aeso", "?e OVER", "aer eip", "aer eax"],
+            "checks": [{"type": "regex", "value": r"(?s)SKIP\s+0x00000005\s+0x00000000.*OVER\s+0x00000005\s+0x00005678"}],
+            "prompts": [
+                "What is the practical difference between `aess` and `aeso` on a call?",
+                "How can I skip a call versus execute it and stop after it in ESIL?",
+            ],
+            "answer": "Both commands leave the PC after the call instruction, but their side effects differ. `aess` skips the call, so the callee does not run. `aeso` steps over: it executes the callee and returns to the instruction after the call. Here the callee assigns `eax=0x5678`, proving that only `aeso` ran it.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"],
+            "tags": ["emulation", "aes", "aess", "aeso", "calls"],
+        },
+        {
+            "id": "esil.until-address",
+            "topic": "workflow.esil.until-address",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["wx 40404040", "aei", "aeim", "aer eax=0", "aer eip=0", "aesu 3", "aer eax", "aer eip"],
+            "checks": [{"type": "regex", "value": r"(?m)^0x00000003\n0x00000003$"}],
+            "prompts": [
+                "How can ESIL run until a specific address instead of manually repeating `aes`?",
+                "Demonstrate `aesu` with an observable register result.",
+            ],
+            "answer": "After initializing the VM and PC, `aesu 3` steps until the emulated program counter reaches address 3. With one-byte `inc eax` instructions, both `eax` and `eip` end at 3. Always ensure the target is reachable or constrain automation to avoid an unbounded run.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"],
+            "tags": ["emulation", "aesu", "until-address"],
+        },
+        {
+            "id": "esil.until-expression",
+            "topic": "workflow.esil.until-expression",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["wx 40404040", "aei", "aeim", "aer eax=0", "aer eip=0", "aesue eax,2,==,$z", "aer eax", "aer eip"],
+            "checks": [{"type": "regex", "value": r"(?m)^0x00000002\n0x00000002$"}],
+            "prompts": [
+                "How do I step ESIL until `eax == 2`?",
+                "Why does an `aesue` condition use `$z` in this workflow?",
+            ],
+            "answer": "Use `aesue eax,2,==,$z`: the comparison updates ESIL flags and `$z` materializes the zero/equality result used as the stop condition. The two `inc eax` instructions make the condition true at PC 2. A plain comparison expression can have different stack/condition behavior, so verify the exact ESIL predicate.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"],
+            "tags": ["emulation", "aesue", "esil-expression"],
+        },
+        {
+            "id": "esil.custom-stack",
+            "topic": "workflow.esil.stack",
+            "fixture": "malloc://8192",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["aei", "aeim 0x1000 0x100 training_stack", "dr SP"],
+            "checks": [{"type": "contains", "value": "0x00001080"}],
+            "prompts": [
+                "How can I initialize a custom ESIL stack and verify its stack pointer?",
+                "Explain the address, size, and name arguments to `aeim` in a concrete workflow.",
+            ],
+            "answer": "After `aei`, run `aeim 0x1000 0x100 training_stack` to create a named 0x100-byte emulation stack at 0x1000. The initialized `SP` is placed at its midpoint, 0x1080 in this checked setup. Use `dr SP` or `aer SP` to verify the register profile and resulting stack pointer.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aes"],
+            "tags": ["emulation", "aei", "aeim", "stack"],
+        },
+        {
+            "id": "esil.step-back",
+            "use_active_r2": True,
+            "topic": "workflow.esil.step-back",
+            "fixture": "malloc://64",
+            "r2_args": ["-a", "x86", "-b", "32"],
+            "commands": ["e io.cache=true", "wx b801000000bb02000000", "s 0", "aei", "aeim", "aeip", "aes", "aes", "?e FORWARD", "aer eip", "aer eax", "aer ebx", "aesb", "?e BACK", "aer eip", "aer eax", "aer ebx"],
+            "checks": [{"type": "regex", "value": r"(?s)FORWARD\s+0x0000000a\s+0x00000001\s+0x00000002.*BACK\s+0x00000005\s+0x00000001\s+0x00000000"}],
+            "prompts": [
+                "How can I step ESIL backward and verify that register state was restored?",
+                "Demonstrate `aesb` after two state-changing instructions.",
+            ],
+            "answer": "Enable cached writes for reversible state, initialize ESIL and its PC, then step twice. `aesb` restores the previous emulation state: the PC moves from 0xa to 5, `eax` remains 1 from the first instruction, and `ebx` returns from 2 to 0 because the second instruction was undone.",
+            "refs": ["libr/core/cmd_anal.inc.c", "test/db/cmd/cmd_aesb"],
+            "tags": ["emulation", "aesb", "reverse-step"],
+        },
+    ]
+    if native:
+        specs.extend([
+            {
+                "id": "debug.register-alias-set",
+                "topic": "workflow.debug.registers",
+                "fixture": native,
+                "r2_args": ["-d"],
+                "commands": ["?e ALIASES", "drn PC", "drn SP", "drn A0", "?e VALUE", "dr A0=0x33", "dr A0", "dk 9"],
+                "checks": [{"type": "contains", "value": "ALIASES"}, {"type": "contains", "value": "VALUE"}, {"type": "regex", "value": r"(?m)^0x0*33$"}],
+                "prompts": [
+                    "How can a debugger workflow set an argument register without hard-coding `rax` or `x0`?",
+                    "Explain `drn` role aliases and `dr A0=0x33` on a live target.",
+                ],
+                "answer": "Use `drn PC`, `drn SP`, and `drn A0` to see which concrete registers implement those roles in the active profile. Then `dr A0=0x33` sets the first argument-register role and `dr A0` reads it back. On AArch64 `A0` commonly maps to `x0`; on x86-64 it commonly maps to `rdi`. Use `dr rax` only when the target profile actually has `rax`.",
+                "refs": ["libr/core/cmd_debug.inc.c", "test/db/cmd/cmd_dr"],
+                "tags": ["debugger", "dr", "drn", "register-aliases"],
+            },
+            {
+                "id": "debug.breakpoint-lifecycle",
+                "topic": "workflow.debug.breakpoints",
+                "fixture": native,
+                "r2_args": ["-d"],
+                "commands": ["aaa", "?e EMPTY", "dbj", "db entry0", "?e SET", "dbj", "db-entry0", "?e REMOVED", "dbj", "dk 9"],
+                "checks": [{"type": "regex", "value": r"(?s)EMPTY\s+\[\].*SET\s+\[\{.*\"name\":\"entry0\".*REMOVED\s+\[\]"}],
+                "prompts": [
+                    "How do I add, inspect, and remove a breakpoint at `entry0`?",
+                    "Demonstrate a complete `db`/`dbj` breakpoint lifecycle.",
+                ],
+                "answer": "In a debug session, add with `db entry0`, inspect structured state with `dbj`, and remove with `db-entry0`. The JSON row confirms the breakpoint address, enabled state, validity, and name. `db` changes debugger state; `dbj` only reports it.",
+                "refs": ["libr/core/cmd_debug.inc.c", "test/db/archos/linux-x86_64/dbg_bps"],
+                "tags": ["debugger", "breakpoints", "db", "dbj"],
+            },
+            {
+                "id": "debug.single-step-pc",
+                "topic": "workflow.debug.step",
+                "fixture": native,
+                "r2_args": ["-d"],
+                "commands": ["f step_before=`dr PC`", "ds", "?e PC_DELTA", "?vi PC-step_before", "dk 9"],
+                "checks": [{"type": "regex", "value": r"(?m)^PC_DELTA\n-?[1-9][0-9]*$"}],
+                "prompts": [
+                    "How can I prove that `ds` advanced a live debugger by one instruction?",
+                    "Create an architecture-neutral single-step check using the `PC` alias.",
+                ],
+                "answer": "Capture the current program counter, run `ds`, and compare the new `PC` with the saved value. A nonzero delta proves the debugger advanced. Do not assume a fixed byte delta: instruction width varies by architecture and instruction encoding.",
+                "refs": ["libr/core/cmd_debug.inc.c"],
+                "tags": ["debugger", "ds", "PC", "single-step"],
+            },
+            {
+                "id": "debug.memory-maps-json",
+                "topic": "workflow.debug.memory-maps",
+                "fixture": native,
+                "r2_args": ["-d"],
+                "commands": ["dmj", "dk 9"],
+                "checks": [{"type": "contains", "value": "\"addr\":"}, {"type": "contains", "value": "\"addr_end\":"}, {"type": "contains", "value": "\"perm\":"}],
+                "prompts": [
+                    "How can an agent retrieve live process memory maps in a parseable form?",
+                    "When should I use `dmj` instead of the text or bar views of `dm`?",
+                ],
+                "answer": "Use `dmj` for JSON memory maps containing start/end addresses, permissions, names, and backing files. Use plain `dm` for interactive text and `dm=` for a visual bar view. Re-query maps after loading libraries or other process state changes because mappings are dynamic.",
+                "refs": ["libr/core/cmd_debug.inc.c"],
+                "tags": ["debugger", "memory-maps", "dmj", "json"],
+            },
+        ])
+    return specs
+
+
+def focused_workflow_rows(
+    r2_bin: Path,
+    r2_source: Path,
+    timeout: int,
+    active_r2_bin: Path | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+    for spec in focused_workflow_specs(r2_source):
+        entry = {
+            "id": "agentic.command-workflow." + str(spec["id"]),
+            "kind": "reasoning_task",
+            "fixture": spec["fixture"],
+            "run_cwd": str(ROOT),
+            "r2_args": list(spec.get("r2_args", [])),
+            "starter_commands": list(spec["commands"]),
+            "checks": list(spec["checks"]),
+            "answer": spec["answer"],
+            "question": spec["prompts"][0],
+        }
+        verifier_bin = active_r2_bin if spec.get("use_active_r2") and active_r2_bin else r2_bin
+        verification = run_entry(entry, verifier_bin, r2_source, timeout)
+        if not verification.ok:
+            rejected.append({
+                "id": entry["id"],
+                "reason": verification.reason or verification.status,
+                "output_excerpt": output_excerpt(sanitize_text(verification.output, r2_source), 800),
+            })
+            continue
+        commands = "\n".join(f"- `{command}`" for command in spec["commands"] if not command.startswith("?e ") and command != "dk 9")
+        native_debug = "-d" in spec.get("r2_args", [])
+        if native_debug:
+            observation = (
+                f"The native-debug sequence completed and all {len(spec['checks'])} declared output checks passed. "
+                "Runtime addresses are intentionally omitted because ASLR makes them target-run-specific."
+            )
+        else:
+            observation = output_excerpt(sanitize_text(verification.output, r2_source), 1400)
+        answer = (
+            f"{spec['answer']}\n\nVerified command sequence:\n{commands}\n\n"
+            f"Observed evidence:\n{observation}"
+        )
+        summary = verification_summary(verification, r2_source, verifier_bin)
+        if native_debug:
+            summary["output_excerpt"] = observation
+            summary["output_sha256"] = hashlib.sha256(observation.encode("utf-8")).hexdigest()
+        for variant, question in enumerate(spec["prompts"], 1):
+            row_id = f"agentic.command-workflow.{spec['id']}.v{variant}"
+            rows.append({
+                "content_fingerprint": stable_hash(spec["id"], variant, question, answer),
+                "id": row_id,
+                "kind": "agentic_command_workflow",
+                "messages": [
+                    {"role": "system", "content": COMMAND_SYSTEM_PROMPT},
+                    {"role": "user", "content": question},
+                    {"role": "assistant", "content": answer},
+                ],
+                "source_refs": list(spec["refs"]),
+                "status": "documented",
+                "tags": ["agentic-command", "verified-workflow", *spec["tags"]],
+                "topic": spec["topic"],
+                "verification": copy.deepcopy(summary),
+            })
+    return rows, rejected
+
+
 def command_training_rows(rows: list[dict[str, Any]], family_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     out = []
     for row in [*rows, *(family_rows or [])]:
@@ -2331,6 +2778,7 @@ def validate_command_outputs(
     family_rows: list[dict[str, Any]],
     training_rows: list[dict[str, Any]],
     help_snapshot: str,
+    focused_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
     def has_successful_evidence(row: dict[str, Any]) -> bool:
         verification = row.get("verification") or {}
@@ -2344,13 +2792,14 @@ def validate_command_outputs(
 
     require_unique_ids(rows, "command database")
     require_unique_ids(family_rows, "command family database")
+    require_unique_ids(focused_rows or [], "focused command database")
     require_unique_ids(training_rows, "command training export")
     if len(help_snapshot.splitlines()) < 1000:
         raise ValueError("refusing to replace the full ?* snapshot with truncated help")
     if any(row.get("status") == "needs-memory" for row in training_rows):
         raise ValueError("needs-memory row leaked into command training export")
     documented_without_evidence = [
-        row for row in [*rows, *family_rows]
+        row for row in [*rows, *family_rows, *(focused_rows or [])]
         if row.get("status") == "documented"
         and not has_successful_evidence(row)
     ]
@@ -2368,6 +2817,9 @@ def validate_command_outputs(
         ]),
         "evidence_backed_family_rows": len([
             row for row in family_rows if has_successful_evidence(row)
+        ]),
+        "evidence_backed_focused_rows": len([
+            row for row in (focused_rows or []) if has_successful_evidence(row)
         ]),
         "human_reviewed_rows": len([row for row in rows if row.get("status") == "human-reviewed"]),
         "withheld_rows": len([row for row in rows if row.get("status") == "needs-memory"]),
@@ -3062,11 +3514,23 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
     previous_by_id = rows_by_id(previous)
     changed = [row for row in rows if previous_by_id.get(str(row.get("id"))) != row]
     selection_rows = command_selection_rows(rows)
-    training_rows = command_training_rows(rows, [*family_rows, *selection_rows])
-    quality_gate = validate_command_outputs(rows, family_rows, training_rows, help_snapshot)
+    command_focus_rows = focused_command_rows(rows)
+    # Command help should follow the active installed r2, while executable
+    # workflows prefer the source-tree build so the binary and libr ABI match.
+    workflow_r2_bin = pick_r2_bin(args.r2_bin)
+    workflow_rows, rejected_workflows = focused_workflow_rows(
+        workflow_r2_bin,
+        r2_source,
+        args.timeout,
+        active_r2_bin=r2_bin,
+    )
+    focused_rows = [*command_focus_rows, *workflow_rows]
+    training_rows = command_training_rows(rows, [*family_rows, *selection_rows, *focused_rows])
+    quality_gate = validate_command_outputs(rows, family_rows, training_rows, help_snapshot, focused_rows)
     write_jsonl_if_changed(COMMANDS_DB_PATH, rows)
     write_jsonl_if_changed(COMMANDS_FAMILIES_PATH, family_rows)
     write_jsonl_if_changed(COMMANDS_SELECTION_PATH, selection_rows)
+    write_jsonl_if_changed(COMMANDS_FOCUSED_PATH, focused_rows)
     write_jsonl_if_changed(COMMANDS_TRAINING_PATH, training_rows)
     gaps = [row for row in rows if row.get("status") == "needs-memory"]
     topics: list[dict[str, Any]] = []
@@ -3093,6 +3557,10 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
         "command_family_rows": len(family_rows),
         "command_scope_rows": len([row for row in rows if row.get("scope") == "command"]),
         "command_selection_rows": len(selection_rows),
+        "focused_command_rows": len(command_focus_rows),
+        "verified_workflow_rows": len(workflow_rows),
+        "verified_workflow_specs": len({row.get("topic") for row in workflow_rows}),
+        "rejected_workflows": rejected_workflows,
         "modifier_scope_rows": len([row for row in rows if row.get("scope") == "modifier"]),
         "workflow_linked_rows": workflow_linked_rows,
         "documented_rows": len([row for row in rows if row.get("status") == "documented"]),
@@ -3106,6 +3574,7 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
         "knowledge_memory_topics": len(knowledge_topics),
         "quality_gate": quality_gate,
         "radare2_version": radare2_version_line(r2_bin),
+        "workflow_radare2_version": radare2_version_line(workflow_r2_bin),
         "memory_topics_queued": queued_count,
         "help_snapshot": repo_path_ref(COMMAND_HELP_SNAPSHOT_PATH),
         "help_snapshot_lines": len(help_snapshot.splitlines()),
@@ -3121,6 +3590,9 @@ def build_agentic_command_database(args: argparse.Namespace) -> int:
     print(f"agentic commands db {repo_path_ref(COMMANDS_DB_PATH)}")
     print(f"agentic commands families {len(family_rows)} rows in {repo_path_ref(COMMANDS_FAMILIES_PATH)}")
     print(f"agentic commands selections {len(selection_rows)} rows in {repo_path_ref(COMMANDS_SELECTION_PATH)}")
+    print(f"agentic commands focused {len(focused_rows)} rows in {repo_path_ref(COMMANDS_FOCUSED_PATH)}")
+    if rejected_workflows:
+        print(f"agentic commands rejected {len(rejected_workflows)} focused workflows whose checks did not match")
     print(f"agentic commands training {repo_path_ref(COMMANDS_TRAINING_PATH)}")
     print(f"agentic commands help snapshot {len(help_snapshot.splitlines())} lines in {repo_path_ref(COMMAND_HELP_SNAPSHOT_PATH)}")
     print(f"agentic commands memory topics {topic_count} written to {repo_path_ref(COMMANDS_MEMORY_TOPICS_PATH)}")

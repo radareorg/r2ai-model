@@ -25,8 +25,13 @@ Files:
 * `data/agentic-commands/selection.jsonl`: balanced inverse examples that map a
   documented user intent to one representative command per family, plus
   commands observed in executable workflows.
+* `data/agentic-commands/focused-workflows.jsonl`: dense lessons for a reviewed
+  set of analysis, ESIL, and debugger commands, plus executable multi-command
+  workflows. Each workflow is emitted only when its observed output satisfies
+  deterministic checks.
 * `data/agentic-commands/verified.jsonl`: chat-format training export combining
-  trusted individual, command-family, and intent-selection rows.
+  trusted individual, command-family, intent-selection, focused-command, and
+  workflow rows.
 * `data/radare2/sources/all_commands.txt`: current sanitized output of `?*`.
 * `data/agentic-commands/memory-topics.jsonl`: questions generated from weak
   command explanations and command usage mined from the knowledge database.
@@ -48,7 +53,12 @@ legend token like `_C` from being learned as a standalone shell command.
 The build has deterministic quality gates: duplicate IDs, truncated `?*`
 output, unverified documented rows, malformed conversations, and accidental
 `needs-memory` promotion fail the command. The index records the help hash,
-coverage, trust counts, and workflow linkage. Set
+coverage, trust counts, focused curriculum counts, workflow linkage, rejected
+workflow evidence, and the radare2 versions used for help and executable
+checks. Command help follows the active installed radare2. Executable workflows
+prefer the source-tree build so the executable and libraries have matching
+ABIs; a workflow can explicitly require the active build when it verifies newer
+behavior. Set
 `AGENTIC_COMMANDS_ARGS="--memory-limit 0 --no-queue-memory"` when refreshing the
 dataset without changing the human-review queue.
 
