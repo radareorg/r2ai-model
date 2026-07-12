@@ -3,6 +3,10 @@
 Basic workflow for this repository:
 
 ```sh
+# discover root and lower-level training targets
+make help
+make -C training help
+
 # install the agent-facing CLI into /usr/local/bin
 make install
 r2ai-model status

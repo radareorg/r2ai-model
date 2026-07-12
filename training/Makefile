@@ -114,21 +114,34 @@ clean:
 
 # Help
 help:
-	@echo "Available targets:"
-	@echo "  all                    - Install dependencies, merge training data, train, and export"
-	@echo "  venv                   - Create Python virtual environment"
-	@echo "  deps                   - Install Python dependencies"
-	@echo "  compile-dataset        - Compile the classic dataset from source scripts"
-	@echo "  merge-agentic-dataset  - Merge classic, verified, agentic, command, and memory JSONL datasets"
-	@echo "  train                  - Install dependencies, merge all training-ready data, and train with CONFIG"
-	@echo "  preflight              - Validate CONFIG tokenizer/template compatibility without model weights"
-	@echo "  train-agentic          - Backward-compatible alias for train"
-	@echo "  train-minicpm5         - Train openbmb/MiniCPM5-1B with config.minicpm5.yaml"
-	@echo "  train-lfm25            - Train LiquidAI/LFM2.5-1.2B-Instruct with config.lfm2.5.yaml"
-	@echo "  chat                   - Import MODEL into Ollama and run an interactive chat"
-	@echo "  serve                  - Serve MODEL with llama.cpp server"
-	@echo "  clean                  - Clean up generated files and environments"
-	@echo "  help                   - Show this help message"
-	@echo ""
-	@echo "Usage: make -C training [target]"
-	@echo "Example: make -C training chat"
+	@printf '%s\n' \
+		'Training make targets' \
+		'' \
+		'  all                    Train with the default CONFIG (same as train)' \
+		'  venv                   Create the Python virtual environment' \
+		'  deps                   Install or update Python dependencies' \
+		'  compile-dataset        Compile the classic dataset source files' \
+		'  merge-agentic-dataset  Merge all training-ready JSONL sources' \
+		'  preflight              Validate CONFIG and every merged row without model weights' \
+		'  train                  Merge, train with CONFIG, and run the configured export' \
+		'  train-agentic          Backward-compatible alias for train' \
+		'  train-minicpm5         Train with config.minicpm5.yaml' \
+		'  train-lfm25            Train with config.lfm2.5.yaml' \
+		'  ollama-create          Import MODEL into Ollama as OLLAMA_MODEL' \
+		'  chat                   Import MODEL and start an Ollama chat' \
+		'  serve                  Serve MODEL through llama.cpp' \
+		'  clean                  Remove venv, output directories, and Python caches' \
+		'  help                   Show this target and variable reference' \
+		'' \
+		'Common variables:' \
+		'  CONFIG=config.yaml' \
+		'  MERGED_DATASET=../data/training/radare2_all_agentic_train.jsonl' \
+		'  MODEL=radare2-qwen3-4b-finetuned.gguf' \
+		'  OLLAMA_MODEL=r2ai-local' \
+		'  LLAMA_CTX=4096 LLAMA_HOST=127.0.0.1 LLAMA_PORT=8080' \
+		'  LLAMA_ARGS="..." LLAMA_CPP_BIN=path LLAMA_SERVER=path' \
+		'  LLAMA_LIBRARY_PATH=path' \
+		'' \
+		'Usage: make -C training [target] [VARIABLE=value ...]' \
+		'Example: make -C training preflight CONFIG=config.minicpm5.yaml' \
+		'See ../doc/make.md for the complete reference and examples.'

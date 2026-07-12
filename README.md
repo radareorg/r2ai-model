@@ -14,6 +14,7 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 
 ## Documentation
 
+* [doc/make.md](doc/make.md) -> complete root and training Make target reference.
 * [doc/learn.md](doc/learn.md) -> discover and register new agentic knowledge.
 * [doc/commands.md](doc/commands.md) -> build the radare2 command grammar dataset and memory queue.
 * [doc/review.md](doc/review.md) -> verify knowledge and handle human review.
@@ -21,6 +22,10 @@ Dataset is stored in Q/A form (Question/Answer) separating them by tabs (TSV) wh
 * [doc/bugs.md](doc/bugs.md) -> understand `R2BUGS.md` and generated source-audit leads.
 * [doc/train.md](doc/train.md) -> merge datasets, choose a model, and train.
 * [AGENTS.md](AGENTS.md) -> minimal command cheat sheet for agents.
+
+Run `make help` for the short target and variable reference. Use
+`make -C training help` for lower-level environment, merge, model-specific
+training, Ollama, llama.cpp, and cleanup targets.
 
 ## Installable CLI
 
