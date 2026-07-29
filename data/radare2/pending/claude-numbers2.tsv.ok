@@ -22,3 +22,4 @@ Forensics	How do I get sector alignment padding?	?v 512-($o%512)
 Malware Analysis	How do I find size of code section?	?v $SS{.text}
 Firmware Analysis	How do I get size of bootloader section?	?v $SS{bootloader}
 Firmware Analysis	How do I calculate the crc32 checksum of current section?	ph:crc32 $SS @ $SB
+Exploit Dev	How do I get stack frame size for local variable analysis?	?v $r{BP}-$r{SP}

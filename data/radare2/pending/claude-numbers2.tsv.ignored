@@ -99,3 +99,8 @@ Debug	How do I find distance to next breakpoint?	?v $Cn-$$
 Malware Analysis	How do I measure size of unpacking stub?	?v $Fe-$FB
 Firmware Analysis	How do I calculate flash page boundaries?	?v $$-($$ % 4096)
 Firmware Analysis	How do I find offset between two memory-mapped regions?	?v $M-$B
+Firmware Analysis	How do I get size of firmware section for extraction?	?v $SS
+Exploit Dev	How do I get size of memory region for heap spray?	?v $MM
+Exploit Dev	How do I calculate padding needed to align stack?	?v 16-($r{rsp}%16)
+Exploit Dev	How do I find offset between two consecutive function calls?	?v $Cn-$C{n-1}
+Exploit Dev	How do I calculate distance to next readable memory page?	?v $MM-$$
